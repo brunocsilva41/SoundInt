@@ -69,4 +69,35 @@ if(SOUNDINT_BUILD_TESTS)
     target_include_directories(soundint_tests PRIVATE "${CMAKE_SOURCE_DIR}/third_party/doctest")
     target_link_libraries(soundint_tests PRIVATE core audio ui update)
     add_test(NAME unit COMMAND soundint_tests)
+
+    # Testes por track: permitem rodar a suite propria durante a execucao
+    # paralela sem depender dos modulos ainda em progresso.
+    function(soundint_track_test track)
+        file(GLOB _srcs CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tests/${track}*_test.cpp")
+        if(NOT _srcs)
+            return()
+        endif()
+        add_executable(soundint_tests_${track} "${CMAKE_SOURCE_DIR}/tests/main.cpp" ${_srcs})
+        target_include_directories(soundint_tests_${track} PRIVATE
+            "${CMAKE_SOURCE_DIR}/third_party/doctest")
+        target_link_libraries(soundint_tests_${track} PRIVATE ${ARGN})
+    endfunction()
+
+    soundint_track_test(core core)
+    soundint_track_test(audio audio)
+    soundint_track_test(ui ui)
+    soundint_track_test(update update)
+
+    # Testes do app-shell (politica pura, sem janelas): links apenas em core.
+    file(GLOB SOUNDINT_APP_TEST_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tests/app*_test.cpp")
+    file(GLOB SOUNDINT_APP_POLICY_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/app/policy*.cpp")
+    if(SOUNDINT_APP_TEST_SOURCES AND SOUNDINT_APP_POLICY_SOURCES)
+        add_executable(soundint_tests_app "${CMAKE_SOURCE_DIR}/tests/main.cpp"
+            ${SOUNDINT_APP_TEST_SOURCES} ${SOUNDINT_APP_POLICY_SOURCES})
+        target_include_directories(soundint_tests_app PRIVATE
+            "${CMAKE_SOURCE_DIR}/third_party/doctest"
+            "${CMAKE_SOURCE_DIR}/src" "${SOUNDINT_GENERATED_DIR}")
+        target_link_libraries(soundint_tests_app PRIVATE core)
+        add_test(NAME app_policy COMMAND soundint_tests_app)
+    endif()
 endif()

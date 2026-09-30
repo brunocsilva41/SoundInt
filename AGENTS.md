@@ -32,10 +32,15 @@ dispositivos/sessoes de audio e roteia saidas por app no Windows 10/11 x64.
 ## Comandos de verificação
 
 ```
-cmake -B out/<track> -DCMAKE_BUILD_TYPE=Debug
+cmake -B out/<track> -A x64 -DCMAKE_BUILD_TYPE=Debug
 cmake --build out/<track> --config Debug --target <alvo> 2>&1 | Select-String "error"
-out\<track>\Debug\soundint_tests.exe                      # testes
+out\<track>\Debug\soundint_tests_<track>.exe      # suite do SEU track (paralelo)
+out\<track>\Debug\soundint_tests.exe              # suite completa (final/integracao)
 ```
+
+Durante execucao paralela use o alvo do seu modulo (`core`/`audio`/`ui`/
+`update`/`SoundInt`) e a suite `soundint_tests_<track>`. Erros em arquivos de
+outros tracks sao esperados (codigo em progresso): **nao corrija** — reporte.
 
 ## Relatorio obrigatório (final do agente)
 
