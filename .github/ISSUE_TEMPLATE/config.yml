@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "Seguranca (vulnerabilidades)"
+    url: https://github.com/OWNER/SoundInt/security/advisories/new
+    about: "Nao abra issue publica para vulnerabilidades — relate em privado."
+  - name: "Discussions (duvidas e ideias)"
+    url: https://github.com/OWNER/SoundInt/discussions
+    about: "Perguntas de uso, ajuda e brainstorming que nao sao bugs."
+  - name: "Contribuindo"
+    url: https://github.com/OWNER/SoundInt/blob/main/CONTRIBUTING.md
+    about: "Guia de setup, estilo de commits e regras de Pull Request."

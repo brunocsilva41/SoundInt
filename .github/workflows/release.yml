@@ -1,0 +1,491 @@
+# ============================================================================
+# RELEASE — pipeline de release ESTAVEL.
+# Etapas separadas por needs:
+#   1/6 validate  : tag == project VERSION do CMakeLists + entrada no CHANGELOG
+#                   (tambem detecta se os segredos de assinatura existem).
+#   2/6 build-test: Release x64 + suites de teste + ctest.
+#   3/6 package   : Inno Setup (choco) -> SoundInt-Setup-<ver>.exe, zip portatil,
+#                   SHA256SUMS.txt e update-manifest.json (aponta para o .exe).
+#   4/6 sign      : signtool — roda SOMENTE se CERT_BASE64/CERT_PASSWORD existirem.
+#   5/6 draft     : cria/atualiza a release em DRAFT com todos os assets (gh).
+#   6/6 publish   : environment: production (aprovacao manual) ->
+#                   gh release edit --draft=false.
+# Artefatos sao transportados entre jobs via upload/download-artifact.
+# ============================================================================
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag da release a publicar (ex.: v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Etapa 1/6 — validate: tag confere com o VERSION do CMake e o CHANGELOG.
+  # ---------------------------------------------------------------------------
+  validate:
+    name: "1/6 validate"
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      can_sign: ${{ steps.secrets.outputs.can_sign }}
+    steps:
+      - name: Checkout (tag da release)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Validar tag, versao do CMake e CHANGELOG
+        id: version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cmake = Get-Content -Raw CMakeLists.txt
+          if ($cmake -notmatch 'project\(\s*SoundInt\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)') {
+            throw 'Nao encontrei project(SoundInt VERSION x.y.z) no CMakeLists.txt.'
+          }
+          $version = $Matches[1]
+          $expected = "v$version"
+          if ($env:TAG -ne $expected) {
+            throw "Tag '$env:TAG' nao corresponde a versao do CMakeLists ('$expected')."
+          }
+          $changelog = Get-Content -Raw CHANGELOG.md
+          $entry = '## [' + $version + ']'
+          if ($changelog -notmatch [regex]::Escape($entry)) {
+            throw "CHANGELOG.md nao contem a entrada '$entry'."
+          }
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$version"
+          Write-Host "OK: tag $env:TAG == CMake $version e entrada '$entry' presente no CHANGELOG."
+
+      - name: Detectar segredos de assinatura
+        id: secrets
+        shell: pwsh
+        env:
+          CERT_BASE64: ${{ secrets.CERT_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.CERT_PASSWORD }}
+        run: |
+          $can = ('' -ne $env:CERT_BASE64) -and ('' -ne $env:CERT_PASSWORD)
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "can_sign=$($can.ToString().ToLower())"
+          Write-Host "Segredos de assinatura disponiveis: $can"
+
+  # ---------------------------------------------------------------------------
+  # Etapa 2/6 — build-test: Release x64 + suites + ctest.
+  # ---------------------------------------------------------------------------
+  build-test:
+    name: "2/6 build-test"
+    needs: validate
+    runs-on: windows-latest
+    steps:
+      - name: Checkout (tag da release)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Configurar (CMake x64 Release)
+        run: cmake -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compilar (Release)
+        run: cmake --build build --config Release --parallel
+
+      - name: Testes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $suites = @(
+            'soundint_tests',
+            'soundint_tests_core',
+            'soundint_tests_audio',
+            'soundint_tests_ui',
+            'soundint_tests_update',
+            'soundint_tests_app'
+          )
+          $found = 0
+          foreach ($s in $suites) {
+            $exe = Join-Path 'build\Release' "$s.exe"
+            if (Test-Path $exe) {
+              Write-Host "::group::Executando $s.exe"
+              & $exe
+              $code = $LASTEXITCODE
+              Write-Host "::endgroup::"
+              if ($code -ne 0) { throw "Suite $s.exe falhou (exit code $code)" }
+              $found++
+            } else {
+              Write-Host "Suite $s.exe nao encontrada (ignorando)."
+            }
+          }
+          if ($found -eq 0) { throw 'Nenhuma suite de testes encontrada em build\Release.' }
+          ctest --test-dir build -C Release --output-on-failure
+
+      - name: Publicar binario (artefato)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-build
+          path: build/Release/SoundInt.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # Etapa 3/6 — package: Inno Setup + zip + SHA256SUMS + update-manifest.json.
+  # ---------------------------------------------------------------------------
+  package:
+    name: "3/6 package"
+    needs: [validate, build-test]
+    runs-on: windows-latest
+    steps:
+      - name: Checkout (tag da release)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Baixar binario
+        uses: actions/download-artifact@v4
+        with:
+          name: release-build
+          path: build/Release
+
+      - name: Instalar Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "choco install innosetup falhou ($LASTEXITCODE)" }
+          if (-not (Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) {
+            throw 'ISCC.exe nao encontrado em C:\Program Files (x86)\Inno Setup 6.'
+          }
+
+      - name: Compilar instalador (ISCC)
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Test-Path 'build\Release\SoundInt.exe')) {
+            $f = Get-ChildItem -Recurse -Filter 'SoundInt.exe' -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+            if (-not $f) { throw 'SoundInt.exe nao encontrado no artefato release-build.' }
+            New-Item -ItemType Directory -Force 'build\Release' | Out-Null
+            Move-Item $f.FullName 'build\Release\SoundInt.exe' -Force
+          }
+          $exe = (Resolve-Path 'build\Release\SoundInt.exe').Path
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          & $iscc "/DAppVersion=$env:VERSION" "/DSoundIntExe=$exe" 'installer\SoundInt.iss'
+          if ($LASTEXITCODE -ne 0) { throw "ISCC falhou (exit code $LASTEXITCODE)." }
+          $setup = "installer\Output\SoundInt-Setup-$env:VERSION.exe"
+          if (-not (Test-Path $setup)) { throw "Instalador nao gerado: $setup" }
+          Write-Host "Instalador: $setup"
+
+      - name: Gerar zip portatil, SHA256SUMS e update-manifest.json
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:TAG
+          $version = $env:VERSION
+          $setup = "installer\Output\SoundInt-Setup-$version.exe"
+
+          # Zip portatil: exe + licenca + readme (CRT estatica, sem dependencias).
+          $stage = Join-Path $env:RUNNER_TEMP 'release-stage'
+          Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item 'build\Release\SoundInt.exe' $stage
+          Copy-Item 'LICENSE' $stage
+          Copy-Item 'README.md' $stage
+          $zipName = "SoundInt-$version-portable.zip"
+          $zipPath = Join-Path $env:RUNNER_TEMP $zipName
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipPath -Force
+          Copy-Item $zipPath $zipName -Force
+
+          # SHA256SUMS.txt (instalador + portatil).
+          $lines = foreach ($f in @($setup, $zipName)) {
+            $h = (Get-FileHash -Algorithm SHA256 -Path $f).Hash.ToLower()
+            "$h  $(Split-Path $f -Leaf)"
+          }
+          $lines | Set-Content -Path 'SHA256SUMS.txt' -Encoding ascii
+
+          # Extrai a secao da versao no CHANGELOG para as notas do manifest.
+          function Get-ChangelogNotes([string]$ver) {
+            $capturing = $false
+            $out = @()
+            foreach ($line in (Get-Content CHANGELOG.md)) {
+              if (-not $capturing) {
+                if ($line -match ('^\s*##\s+\[' + [regex]::Escape($ver) + '\]')) { $capturing = $true }
+                continue
+              }
+              if ($line -match '^\s*##\s+\[') { break }
+              $out += $line
+            }
+            (($out -join "`n").Trim())
+          }
+          $notes = Get-ChangelogNotes $version
+          if ([string]::IsNullOrWhiteSpace($notes)) {
+            $notes = "SoundInt $version"
+          }
+
+          # Manifest ESTAVEL: aponta para o .exe do instalador.
+          $manifest = [ordered]@{
+            version    = $version
+            tag        = $tag
+            url        = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag/SoundInt-Setup-$version.exe"
+            sha256     = (Get-FileHash -Algorithm SHA256 -Path $setup).Hash.ToLower()
+            sizeBytes  = [uint64](Get-Item $setup).Length
+            notes      = $notes
+            prerelease = $false
+          }
+          $manifest | ConvertTo-Json -Depth 3 |
+            Set-Content -Path 'update-manifest.json' -Encoding utf8
+          Write-Host "manifest ok: $($manifest.sha256) ($($manifest.sizeBytes) bytes)"
+
+      - name: Publicar artefatos da release
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-package
+          path: |
+            installer/Output/SoundInt-Setup-*.exe
+            SoundInt-*-portable.zip
+            SHA256SUMS.txt
+            update-manifest.json
+          if-no-files-found: error
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Etapa 4/6 — sign: signtool nos binarios. Condicionada aos segredos
+  # CERT_BASE64/CERT_PASSWORD (detectados na etapa validate). Se nao existirem,
+  # o if e falso e o job e pulado — a release segue sem assinatura.
+  # A assinatura altera os bytes: SHA256SUMS.txt e update-manifest.json sao
+  # regerados aqui por seguranca.
+  # ---------------------------------------------------------------------------
+  sign:
+    name: "4/6 sign"
+    needs: [validate, build-test, package]
+    if: ${{ needs.validate.outputs.can_sign == 'true' }}
+    runs-on: windows-latest
+    steps:
+      - name: Checkout (tag da release)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Baixar pacote e binario
+        uses: actions/download-artifact@v4
+        with:
+          name: release-package
+          path: pkg
+
+      - name: Baixar build Release
+        uses: actions/download-artifact@v4
+        with:
+          name: release-build
+          path: build/Release
+
+      - name: Assinar binarios (signtool)
+        shell: pwsh
+        env:
+          CERT_BASE64: ${{ secrets.CERT_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.CERT_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $certPath = Join-Path $env:RUNNER_TEMP 'soundint-sign.pfx'
+          [System.IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:CERT_BASE64))
+          try {
+            $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' |
+              Where-Object { $_.Directory.Parent.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
+              Sort-Object { [version]$_.Directory.Parent.Name } -Descending |
+              Select-Object -First 1
+            if (-not $signtool) { throw 'signtool.exe nao encontrado (Windows SDK).' }
+            Write-Host "signtool: $($signtool.FullName)"
+
+            $targets = @()
+            if (Test-Path 'build\Release\SoundInt.exe') { $targets += (Resolve-Path 'build\Release\SoundInt.exe').Path }
+            $targets += (Get-ChildItem 'pkg' -Filter '*.exe').FullName
+            if (-not $targets) { throw 'Nenhum .exe para assinar.' }
+
+            foreach ($t in $targets) {
+              Write-Host "Assinando $t"
+              & $signtool.FullName sign /fd SHA256 /td SHA256 /tr 'http://timestamp.digicert.com' `
+                /f $certPath /p $env:CERT_PASSWORD $t
+              if ($LASTEXITCODE -ne 0) { throw "signtool falhou em $t (exit $LASTEXITCODE)" }
+            }
+          } finally {
+            Remove-Item $certPath -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Reempacotar portatil e regenerar checksums/manifest
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:VERSION
+          $tag = $env:TAG
+
+          # Recria o zip com o SoundInt.exe ja assinado.
+          $stage = Join-Path $env:RUNNER_TEMP 'sign-stage'
+          Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item 'build\Release\SoundInt.exe' $stage
+          Copy-Item 'LICENSE' $stage
+          Copy-Item 'README.md' $stage
+          $zipName = "SoundInt-$version-portable.zip"
+          $zipPath = Join-Path $env:RUNNER_TEMP $zipName
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipPath -Force
+          Copy-Item $zipPath (Join-Path 'pkg' $zipName) -Force
+
+          # Regenera SHA256SUMS.txt e update-manifest.json (bytes mudaram).
+          $setup = Join-Path 'pkg' "SoundInt-Setup-$version.exe"
+          $lines = foreach ($f in @($setup, (Join-Path 'pkg' $zipName))) {
+            $h = (Get-FileHash -Algorithm SHA256 -Path $f).Hash.ToLower()
+            "$h  $(Split-Path $f -Leaf)"
+          }
+          $lines | Set-Content -Path (Join-Path 'pkg' 'SHA256SUMS.txt') -Encoding ascii
+
+          $notes = "SoundInt $version"
+          $capturing = $false
+          $out = @()
+          foreach ($line in (Get-Content CHANGELOG.md)) {
+            if (-not $capturing) {
+              if ($line -match ('^\s*##\s+\[' + [regex]::Escape($version) + '\]')) { $capturing = $true }
+              continue
+            }
+            if ($line -match '^\s*##\s+\[') { break }
+            $out += $line
+          }
+          $text = (($out -join "`n").Trim())
+          if (-not [string]::IsNullOrWhiteSpace($text)) { $notes = $text }
+
+          $manifest = [ordered]@{
+            version    = $version
+            tag        = $tag
+            url        = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag/SoundInt-Setup-$version.exe"
+            sha256     = (Get-FileHash -Algorithm SHA256 -Path $setup).Hash.ToLower()
+            sizeBytes  = [uint64](Get-Item $setup).Length
+            notes      = $notes
+            prerelease = $false
+          }
+          $manifest | ConvertTo-Json -Depth 3 |
+            Set-Content -Path (Join-Path 'pkg' 'update-manifest.json') -Encoding utf8
+
+      - name: Republicar artefatos (assinados)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-package
+          path: |
+            pkg/SoundInt-Setup-*.exe
+            pkg/SoundInt-*-portable.zip
+            pkg/SHA256SUMS.txt
+            pkg/update-manifest.json
+          if-no-files-found: error
+          overwrite: true
+
+  # ---------------------------------------------------------------------------
+  # Etapa 5/6 — draft: cria (ou atualiza) a release como RASCUNHO com todos
+  # os assets. Roda mesmo quando sign e pulado (if falso), desde que package
+  # tenha sucesso.
+  # ---------------------------------------------------------------------------
+  draft:
+    name: "5/6 draft"
+    needs: [validate, build-test, package, sign]
+    if: >-
+      ${{ !cancelled() &&
+          needs.build-test.result == 'success' &&
+          needs.package.result == 'success' &&
+          (needs.sign.result == 'success' || needs.sign.result == 'skipped') }}
+    runs-on: windows-latest
+    steps:
+      - name: Checkout (tag da release)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Baixar pacote
+        uses: actions/download-artifact@v4
+        with:
+          name: release-package
+          path: pkg
+
+      - name: Criar/atualizar release DRAFT
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:VERSION
+
+          # Notas: secao da versao no CHANGELOG (fallback: linha simples).
+          $notes = "SoundInt $version"
+          $capturing = $false
+          $out = @()
+          foreach ($line in (Get-Content CHANGELOG.md)) {
+            if (-not $capturing) {
+              if ($line -match ('^\s*##\s+\[' + [regex]::Escape($version) + '\]')) { $capturing = $true }
+              continue
+            }
+            if ($line -match '^\s*##\s+\[') { break }
+            $out += $line
+          }
+          $text = (($out -join "`n").Trim())
+          if (-not [string]::IsNullOrWhiteSpace($text)) { $notes = $text }
+          Set-Content -Path 'release-notes.md' -Value $notes -Encoding utf8
+
+          $assets = @(Get-ChildItem 'pkg' -File | ForEach-Object { $_.FullName })
+          if (-not $assets) { throw 'Nenhum asset em pkg/.' }
+
+          # Verifica se ja existe release (rascunho ou publica) para a tag.
+          gh release view "$env:TAG" | Out-Null
+          $exists = ($LASTEXITCODE -eq 0)
+
+          if ($exists) {
+            Write-Host "Release $env:TAG existe — atualizando como rascunho."
+            gh release upload "$env:TAG" @assets --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'gh release upload falhou.' }
+            gh release edit "$env:TAG" --draft --title "SoundInt $version" --notes-file 'release-notes.md'
+            if ($LASTEXITCODE -ne 0) { throw 'gh release edit falhou.' }
+          } else {
+            gh release create "$env:TAG" @assets `
+              --draft `
+              --title "SoundInt $version" `
+              --notes-file 'release-notes.md' `
+              --target "$env:GITHUB_SHA"
+            if ($LASTEXITCODE -ne 0) { throw 'gh release create falhou.' }
+          }
+          Write-Host "Release DRAFT pronta para $env:TAG com $($assets.Count) asset(s)."
+
+  # ---------------------------------------------------------------------------
+  # Etapa 6/6 — publish: environment production (aprovacao manual) e retirada
+  # do rascunho. E a ultima etapa; so roda se o draft teve sucesso.
+  # ---------------------------------------------------------------------------
+  publish:
+    name: "6/6 publish"
+    needs: [validate, draft]
+    environment: production
+    runs-on: windows-latest
+    steps:
+      - name: Publicar release (remove rascunho)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          gh release edit "$env:TAG" --draft=false
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao publicar a release $env:TAG." }
+          $isDraft = gh release view "$env:TAG" --json isDraft --jq '.isDraft'
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao conferir o estado da release.' }
+          Write-Host "Release $env:TAG publicada (isDraft=$isDraft)."

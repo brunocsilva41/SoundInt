@@ -1,0 +1,60 @@
+name: "Pedido de funcionalidade"
+description: "Sugira uma melhoria ou recurso novo para o SoundInt"
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Conte qual problema você quer resolver — a solucao vem depois.
+        Ideias muito amplas tem mais chance de serem discutidas em Discussions.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: "Problema / motivacao"
+      description: "O que e dificil de fazer hoje no SoundInt?"
+      placeholder: "Ex.: nao consigo manter o Firefox sempre no fone enquanto o Spotify toca na sala."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: "Solucao proposta"
+      description: "Como você imaginaria resolvendo isso?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: "Alternativas consideradas"
+      description: "Outros apps, workarounds ou ideias que você ja tentou."
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: "Area"
+      options:
+        - "Modais / avisos"
+        - "Mixer / volume por app"
+        - "Regras e perfis"
+        - "Hotkeys"
+        - "Dispositivos / auto-switch"
+        - "Atualizador"
+        - "Instalador / distribuicao"
+        - "Desempenho / consumo"
+        - "Outro"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: "Checklist"
+      options:
+        - label: "Pesquisei as issues/discussions existentes."
+          required: true
+        - label: "Este recurso cabe no escopo leve do SoundInt (tray + Win32, sem dependencias pesadas)."
+          required: true

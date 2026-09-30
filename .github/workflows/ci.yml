@@ -1,0 +1,78 @@
+# ============================================================================
+# CI — build + testes em push para main e em Pull Requests.
+# Etapa unica: checkout -> configure -> build Debug (x64) -> suites de teste
+# -> artefatos em falha. Nao depende de nenhum segredo.
+# ============================================================================
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Etapa 1/1 — build-test: compila Debug x64 e roda as suites de teste.
+  # ---------------------------------------------------------------------------
+  build-test:
+    name: "build-test (Windows x64 Debug)"
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar (CMake x64)
+        run: cmake -B build -A x64
+
+      - name: Compilar (Debug)
+        run: cmake --build build --config Debug --parallel
+
+      - name: Testes (suite principal + suites por track)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $suites = @(
+            'soundint_tests',
+            'soundint_tests_core',
+            'soundint_tests_audio',
+            'soundint_tests_ui',
+            'soundint_tests_update',
+            'soundint_tests_app'
+          )
+          $found = 0
+          foreach ($s in $suites) {
+            $exe = Join-Path 'build\Debug' "$s.exe"
+            if (Test-Path $exe) {
+              Write-Host "::group::Executando $s.exe"
+              & $exe
+              $code = $LASTEXITCODE
+              Write-Host "::endgroup::"
+              if ($code -ne 0) { throw "Suite $s.exe falhou (exit code $code)" }
+              $found++
+            } else {
+              Write-Host "Suite $s.exe nao encontrada (ignorando)."
+            }
+          }
+          if ($found -eq 0) { throw 'Nenhuma suite de testes encontrada em build\Debug.' }
+          Write-Host "$found suite(s) executada(s) com sucesso."
+          # Testes registrados no CMake (unit, app_policy).
+          ctest --test-dir build -C Debug --output-on-failure
+
+      - name: Upload de artefatos em falha
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-failure-${{ github.run_id }}
+          path: |
+            build/Testing/**
+            build/**/*.log
+          if-no-files-found: ignore
+          retention-days: 7

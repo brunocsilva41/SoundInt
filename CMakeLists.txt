@@ -64,7 +64,9 @@ target_link_libraries(SoundInt PRIVATE
 # ---------------------------------------------------------------------------
 if(SOUNDINT_BUILD_TESTS)
     enable_testing()
-    file(GLOB SOUNDINT_TEST_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tests/*.cpp")
+    file(GLOB SOUNDINT_TEST_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_SOURCE_DIR}/tests/*.cpp"
+        "${CMAKE_SOURCE_DIR}/src/app/policy*.cpp")
     add_executable(soundint_tests ${SOUNDINT_TEST_SOURCES})
     target_include_directories(soundint_tests PRIVATE "${CMAKE_SOURCE_DIR}/third_party/doctest")
     target_link_libraries(soundint_tests PRIVATE core audio ui update)

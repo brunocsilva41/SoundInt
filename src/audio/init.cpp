@@ -1,13 +1,17 @@
+// ============================================================================
+// Factory publica do modulo de audio (contrato: audio_service.h).
+// Devolve nullptr quando o COM/MMDevice nao inicializa.
+// ============================================================================
 #include "audio/audio_service.h"
 
-namespace soundint::audio {
+#include "audio/audio_service_impl.h"
 
-// STUB Wave 0 — Track A substitui este arquivo por um factory real que
-// construi o AudioService (devices + sessoes + notificacoes) unindo o
-// trabalho dos Tracks A e B.
-std::unique_ptr<IAudioService> createAudioService(EventBus& /*bus*/)
+namespace soundint::audio
 {
-    return nullptr;
+
+std::unique_ptr<IAudioService> createAudioService(EventBus& bus)
+{
+    return createAudioServiceImpl(bus);
 }
 
-}  // namespace soundint::audio
+} // namespace soundint::audio

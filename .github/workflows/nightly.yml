@@ -1,0 +1,228 @@
+# ============================================================================
+# NIGHTLY — build diario de desenvolvimento publicado como PRERELEASE.
+# Etapas (com needs): 1 build -> 2 package -> 3 publish.
+#   build    : Release x64 + ctest; publica o binario como artefato.
+#   package  : zip portatil + update-manifest.json (version 0.1.0-nightly.N,
+#              tag nightly-AAAAMMDD-HHMM, sha256/size do zip, prerelease:true).
+#   publish  : gh release create --prerelease (usa GITHUB_TOKEN).
+# Releases nightly sao prerelease => nunca aparecem em releases/latest,
+# entao o canal stable dos usuarios nao e afetado.
+# ============================================================================
+name: Nightly
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Etapa 1/3 — build: Release x64, testes e publicacao do binario.
+  # ---------------------------------------------------------------------------
+  build:
+    name: "1/3 build"
+    runs-on: windows-latest
+    outputs:
+      base_version: ${{ steps.meta.outputs.base_version }}
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      zip_name: ${{ steps.meta.outputs.zip_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Metadados da versao nightly
+        id: meta
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cmake = Get-Content -Raw CMakeLists.txt
+          if ($cmake -notmatch 'project\(\s*SoundInt\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)') {
+            throw 'Nao encontrei project(SoundInt VERSION x.y.z) no CMakeLists.txt.'
+          }
+          $base = $Matches[1]
+          $version = "$base-nightly.$env:GITHUB_RUN_NUMBER"
+          $stamp = Get-Date -Format 'yyyyMMdd-HHmm'
+          $tag = "nightly-$stamp"
+          $zip = "SoundInt-$version-portable.zip"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "base_version=$base"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$version"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "tag=$tag"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "zip_name=$zip"
+          Write-Host "version=$version tag=$tag"
+
+      - name: Configurar (CMake x64 Release)
+        run: cmake -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compilar (Release)
+        run: cmake --build build --config Release --parallel
+
+      - name: Testes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $suites = @(
+            'soundint_tests',
+            'soundint_tests_core',
+            'soundint_tests_audio',
+            'soundint_tests_ui',
+            'soundint_tests_update',
+            'soundint_tests_app'
+          )
+          $found = 0
+          foreach ($s in $suites) {
+            $exe = Join-Path 'build\Release' "$s.exe"
+            if (Test-Path $exe) {
+              Write-Host "::group::Executando $s.exe"
+              & $exe
+              $code = $LASTEXITCODE
+              Write-Host "::endgroup::"
+              if ($code -ne 0) { throw "Suite $s.exe falhou (exit code $code)" }
+              $found++
+            } else {
+              Write-Host "Suite $s.exe nao encontrada (ignorando)."
+            }
+          }
+          if ($found -eq 0) { throw 'Nenhuma suite de testes encontrada em build\Release.' }
+          ctest --test-dir build -C Release --output-on-failure
+
+      - name: Publicar binario (artefato)
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-build
+          path: build/Release/SoundInt.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Etapa 2/3 — package: zip portatil + update-manifest.json.
+  # ---------------------------------------------------------------------------
+  package:
+    name: "2/3 package"
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Baixar binario
+        uses: actions/download-artifact@v4
+        with:
+          name: nightly-build
+          path: build/Release
+
+      - name: Gerar zip portatil, manifest e checksums
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          TAG: ${{ needs.build.outputs.tag }}
+          ZIP_NAME: ${{ needs.build.outputs.zip_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Normaliza a localizacao do exe baixado (upload/download de artefato).
+          if (-not (Test-Path 'build\Release\SoundInt.exe')) {
+            $f = Get-ChildItem -Recurse -Filter 'SoundInt.exe' -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+            if (-not $f) { throw 'SoundInt.exe nao encontrado no artefato nightly-build.' }
+            New-Item -ItemType Directory -Force 'build\Release' | Out-Null
+            Move-Item $f.FullName 'build\Release\SoundInt.exe' -Force
+          }
+
+          # Zip portatil: exe + licença + readme (CRT estatica, sem dependencias).
+          $stage = Join-Path $env:RUNNER_TEMP 'nightly-stage'
+          Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item 'build\Release\SoundInt.exe' $stage
+          Copy-Item 'LICENSE' $stage
+          Copy-Item 'README.md' $stage
+          $zipPath = Join-Path $env:RUNNER_TEMP $env:ZIP_NAME
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipPath -Force
+
+          $hash = (Get-FileHash -Algorithm SHA256 -Path $zipPath).Hash.ToLower()
+          $size = [uint64](Get-Item $zipPath).Length
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$($env:TAG)/$($env:ZIP_NAME)"
+
+          $notes = "Build nightly automático da versão $($env:VERSION) (run #$($env:GITHUB_RUN_NUMBER), commit $($env:GITHUB_SHA))."
+          $manifest = [ordered]@{
+            version   = $env:VERSION
+            tag       = $env:TAG
+            url       = $url
+            sha256    = $hash
+            sizeBytes = $size
+            notes     = $notes
+            prerelease = $true
+          }
+          $manifest | ConvertTo-Json -Depth 3 |
+            Set-Content -Path 'update-manifest.json' -Encoding utf8
+          "$hash  $env:ZIP_NAME" | Set-Content -Path 'SHA256SUMS.txt' -Encoding ascii
+
+          Copy-Item $zipPath $env:ZIP_NAME -Force
+          Write-Host "zip=$env:ZIP_NAME sha256=$hash size=$size"
+
+      - name: Publicar artefatos do pacote
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-package
+          path: |
+            *-portable.zip
+            update-manifest.json
+            SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # Etapa 3/3 — publish: release PRERELEASE no GitHub (GITHUB_TOKEN).
+  # ---------------------------------------------------------------------------
+  publish:
+    name: "3/3 publish"
+    needs: [build, package]
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Baixar pacote
+        uses: actions/download-artifact@v4
+        with:
+          name: nightly-package
+          path: pkg
+
+      - name: Criar release nightly (prerelease)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $notes = "SoundInt $($env:VERSION)`n`nBuild nightly automático de $($env:GITHUB_SHA). Canal beta — instável por definição."
+          Set-Content -Path 'nightly-notes.md' -Value $notes -Encoding utf8
+          $assets = @(Get-ChildItem 'pkg' -File | ForEach-Object { $_.FullName })
+          if (-not $assets) { throw 'Nenhum asset encontrado em pkg/.' }
+
+          # Reexecucao na mesma tag: apenas reenvia os assets.
+          gh release view "$env:TAG" | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $env:TAG ja existe — atualizando assets."
+            gh release upload "$env:TAG" @assets --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'gh release upload falhou.' }
+            gh release edit "$env:TAG" --prerelease --title "SoundInt $env:VERSION (nightly)" --notes-file 'nightly-notes.md'
+            if ($LASTEXITCODE -ne 0) { throw 'gh release edit falhou.' }
+          } else {
+            gh release create "$env:TAG" @assets `
+              --prerelease `
+              --title "SoundInt $env:VERSION (nightly)" `
+              --notes-file 'nightly-notes.md' `
+              --target "$env:GITHUB_SHA"
+            if ($LASTEXITCODE -ne 0) { throw 'gh release create falhou.' }
+          }
+          Write-Host "Release nightly publicada: $env:TAG"

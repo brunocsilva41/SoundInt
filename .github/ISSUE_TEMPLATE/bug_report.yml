@@ -1,0 +1,95 @@
+name: "Relatório de bug"
+description: "Algo não funciona como esperado no SoundInt"
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado por relatar o problema! Preencha as secoes abaixo para
+        agilizar a correcao. Antes de abrir, pesquise se ja existe uma issue
+        parecida.
+
+  - type: input
+    id: version
+    attributes:
+      label: "Versao do SoundInt"
+      description: "Titulo da janela/Sobre, ou a tag da release usada."
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: "Como o SoundInt foi instalado?"
+      options:
+        - "Instalador (SoundInt-Setup-x.y.z.exe)"
+        - "Portatil (zip)"
+        - "Build local (fontes)"
+    validations:
+      required: true
+
+  - type: input
+    id: windows-build
+    attributes:
+      label: "Build do Windows"
+      description: "Configuracoes > Sistema > Sobre (versao e build)."
+      placeholder: "Windows 11 24H2 - 10.0.26100"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: "Passos para reproduzir"
+      description: "Seja o mais detalhado possivel."
+      placeholder: |
+        1. Abro o menu da bandeja
+        2. Clico em Mixer
+        3. Troco a saida do Spotify
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: "Comportamento esperado"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: "Comportamento observado"
+      description: "Inclua mensagens de erro ou comportamento inesperado."
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: "Contexto adicional"
+      description: "Placa de audio, dispositivos conectados, apps envolvidos, etc."
+
+  - type: upload
+    id: log
+    attributes:
+      label: "Log do aplicativo"
+      description: >-
+        Anexe o arquivo de log (%LOCALAPPDATA%\SoundInt\logs). Se o app
+        nao iniciou, arraste o .dmp ou a saida do console.
+      accept: ".log,.txt,.zip,.dmp"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: "Checklist"
+      options:
+        - label: "Pesquisei as issues existentes e nao encontrei esta."
+          required: true
+        - label: "Estou na versao mais recente (ou sei dizer qual uso)."
+          required: true

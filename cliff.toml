@@ -1,0 +1,63 @@
+# =============================================================================
+# git-cliff — gerador de CHANGELOG a partir de Conventional Commits.
+# Uso: git cliff --output CHANGELOG.md       (preenche a secao Unreleased)
+#      git cliff --tag v0.1.0 -o CHANGELOG.md
+# Documentacao: https://git-cliff.org/docs/configuration
+# =============================================================================
+[changelog]
+header = """
+# Changelog
+
+Todas as mudancas notaveis do SoundInt sao documentadas neste arquivo.
+Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
+e versionado por [Semantic Versioning](https://semver.org/lang/pt-BR/).
+"""
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Não lançado]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | upper_first }}
+{% endfor %}
+{% endfor %}
+"""
+footer = """
+{% for release in releases -%}
+{% if release.version -%}
+{% if release.previous.version -%}
+[{{ release.version | trim_start_matches(pat="v") }}]: \
+https://github.com/OWNER/SoundInt/compare/{{ release.previous.version }}...{{ release.version }}
+{% else -%}
+[{{ release.version | trim_start_matches(pat="v") }}]: \
+https://github.com/OWNER/SoundInt/releases/tag/{{ release.version }}
+{% endif -%}
+{% endif -%}
+{% endfor %}
+"""
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+commit_parsers = [
+    { message = "^feat", group = "Added" },
+    { message = "^fix", group = "Fixed" },
+    { message = "^perf", group = "Performance" },
+    { message = "^refactor", group = "Changed" },
+    { message = "^docs", group = "Documentation" },
+    { message = "^style", group = "Changed" },
+    { message = "^test", group = "Testing" },
+    { message = "^build", group = "Build" },
+    { message = "^ci", group = "CI" },
+    { message = "^chore\\(release\\)", skip = true },
+    { message = "^chore", group = "Changed" },
+    { message = "^revert", group = "Changed" },
+    { body = ".*", group = "Changed" },
+]
+filter_commits = false
+tag_pattern = "v[0-9].*"
+sort_commits = "oldest"

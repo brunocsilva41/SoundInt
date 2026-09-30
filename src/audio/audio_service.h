@@ -18,6 +18,9 @@ public:
     virtual ~IAudioService() = default;
 
     // --- dispositivos ---
+    // Observacao: IMMDeviceEnumerator nao tem SetDefaultAudioEndpoint; a
+    // troca do default usa IPolicyConfig::SetDefaultEndpoint (nao documentada)
+    // por dentro, com validacao previa do endpoint.
     virtual std::vector<DeviceInfo> devices(Flow flow) = 0;
     virtual std::wstring defaultDevice(Flow flow, Role role) = 0;
     virtual bool setDefaultDevice(const std::wstring& deviceId, Flow flow, Role role) = 0;
