@@ -684,6 +684,13 @@ float contentHeightFor(const ContentSpec& spec)
         heights.push_back(layout::kEmptyH);
     }
 
+    if (spec.idleAppRows > 0) {
+        heights.push_back(layout::kSectionH);
+        for (size_t i = 0; i < spec.idleAppRows; ++i) {
+            heights.push_back(layout::kAppRowH);
+        }
+    }
+
     if (spec.systemRow) {
         heights.push_back(layout::kAppRowH);
     }
@@ -748,6 +755,8 @@ SessionPlan planSessions(const std::vector<SessionInfo>& sessions)
         }
         if (session.active) {
             plan.apps.push_back(session);
+        } else {
+            plan.idleApps.push_back(session);
         }
     }
     return plan;
@@ -908,6 +917,17 @@ public:
             addEmpty(tr(L"mixer.empty"));
         } else {
             for (const auto& session : plan.apps) {
+                addAppRow(session, labels, false);
+            }
+        }
+
+        // Listagem dos apps abertos (sessoes paradas): permite escolher a
+        // saida antes do app tocar de novo. Sem linha vazia: so aparece se
+        // houver pelo menos uma sessao parada.
+        if (!plan.idleApps.empty()) {
+            addSection(tr(L"mixer.openApps"));
+            spec.idleAppRows = plan.idleApps.size();
+            for (const auto& session : plan.idleApps) {
                 addAppRow(session, labels, false);
             }
         }

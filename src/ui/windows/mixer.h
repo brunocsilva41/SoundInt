@@ -77,6 +77,7 @@ RECT computeMixerRect(POINT anchor, Size size, const RECT& work);
 struct ContentSpec {
     size_t outputRows = 0;
     size_t appRows = 0;
+    size_t idleAppRows = 0;    // secao "Apps abertos" (sessoes paradas)
     bool systemRow = false;
     size_t dropdownItems = 0;   // itens do dropdown de roteamento aberto (0 = fechado)
 };
@@ -97,9 +98,10 @@ std::vector<SessionInfo> orderSessions(const std::vector<SessionInfo>& sessions)
 
 // Selecao das linhas do flyout a partir de sessions().
 struct SessionPlan {
-    std::vector<SessionInfo> apps;   // sessoes ativas, sem systemSounds
-    bool systemSounds = false;       // ha linha de "Sons do sistema" no fim
-    SessionInfo system;              // valida quando systemSounds == true
+    std::vector<SessionInfo> apps;      // sessoes ativas, sem systemSounds
+    std::vector<SessionInfo> idleApps;  // sessoes abertas mas paradas (listagem p/ rotear)
+    bool systemSounds = false;          // ha linha de "Sons do sistema" no fim
+    SessionInfo system;                 // valida quando systemSounds == true
 };
 
 SessionPlan planSessions(const std::vector<SessionInfo>& sessions);

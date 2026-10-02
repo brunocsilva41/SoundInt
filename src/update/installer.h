@@ -1,5 +1,5 @@
 // ============================================================================
-// Spawn do instalador (Track F): modo silencioso NSIS.
+// Spawn do instalador (Track F): modo silencioso Inno Setup.
 // ============================================================================
 #pragma once
 

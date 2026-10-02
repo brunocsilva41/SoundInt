@@ -1,5 +1,6 @@
 #include "ui/windows/window_base.h"
 
+#include "app/resource.h"
 #include "core/log.h"
 #include "core/store.h"
 #include "ui/palette.h"
@@ -127,6 +128,8 @@ bool WindowBase::create(HINSTANCE instance, const wchar_t* className, DWORD exSt
         wc.lpfnWndProc = &WindowBase::wndProc;
         wc.hInstance = instance;
         wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.hIcon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCE(IDI_SOUNDINT));
+        wc.hIconSm = wc.hIcon;
         wc.hbrBackground = nullptr;
         wc.lpszClassName = className;
         if (!RegisterClassExW(&wc)) {

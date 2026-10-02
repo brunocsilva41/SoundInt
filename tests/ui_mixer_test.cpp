@@ -127,6 +127,12 @@ TEST_CASE("contentHeightFor soma secoes, linhas, divisor e gaps")
     withSystem.systemRow = true;
     const float expected2 = 20.f + 40.f + 1.f + 20.f + 80.f + 80.f + 80.f + 6.f * 4.f;
     CHECK(contentHeightFor(withSystem) == doctest::Approx(expected2));
+
+    // secao "Apps abertos": + secao 20 + 2 linhas 80 + 3 gaps
+    ContentSpec withIdle = withSystem;
+    withIdle.idleAppRows = 2;
+    const float expected3 = expected2 + 20.f + 80.f + 80.f + 3.f * 4.f;
+    CHECK(contentHeightFor(withIdle) == doctest::Approx(expected3));
 }
 
 TEST_CASE("planLayout nao rola quando o conteudo cabe na work area")
@@ -204,7 +210,7 @@ TEST_CASE("orderSessions coloca ativos primeiro e systemSounds por ultimo")
     CHECK(ordered[4].instanceId == L"s2");      // segunda sessao de sistema
 }
 
-TEST_CASE("planSessions separa apps ativos da linha de sistema")
+TEST_CASE("planSessions separa apps ativos, parados e systemSounds")
 {
     std::vector<SessionInfo> sessions;
     sessions.push_back(makeSession(L"a", L"ativo.exe", true));
@@ -214,22 +220,37 @@ TEST_CASE("planSessions separa apps ativos da linha de sistema")
     const SessionPlan plan = planSessions(sessions);
     REQUIRE(plan.apps.size() == 1);
     CHECK(plan.apps[0].instanceId == L"a");
+    REQUIRE(plan.idleApps.size() == 1);      // listagem "Apps abertos"
+    CHECK(plan.idleApps[0].instanceId == L"i");
+    CHECK(plan.idleApps[0].processName == L"inativo.exe");
     CHECK(plan.systemSounds);
     CHECK(plan.system.instanceId == L"s");
 
-    SUBCASE("apenas systemSounds => lista de apps vazia (estado vazio)")
+    SUBCASE("apenas systemSounds => listas de apps vazias (estado vazio)")
     {
         std::vector<SessionInfo> onlySystem;
         onlySystem.push_back(makeSession(L"s", L"system.exe", false, true));
         const SessionPlan sysPlan = planSessions(onlySystem);
         CHECK(sysPlan.apps.empty());
+        CHECK(sysPlan.idleApps.empty());
         CHECK(sysPlan.systemSounds);
+    }
+
+    SUBCASE("apenas sessoes paradas => secao de tocando vazia, idle preenchida")
+    {
+        const SessionPlan idlePlan =
+            planSessions({makeSession(L"i", L"parado.exe", false)});
+        CHECK(idlePlan.apps.empty());
+        REQUIRE(idlePlan.idleApps.size() == 1);
+        CHECK(idlePlan.idleApps[0].processName == L"parado.exe");
+        CHECK(!idlePlan.systemSounds);
     }
 
     SUBCASE("sem sessoes => nada")
     {
         const SessionPlan empty = planSessions({});
         CHECK(empty.apps.empty());
+        CHECK(empty.idleApps.empty());
         CHECK(!empty.systemSounds);
     }
 }

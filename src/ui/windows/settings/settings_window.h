@@ -5,8 +5,11 @@
 // ============================================================================
 #pragma once
 
+#include "core/types.h"
+
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace soundint::ui::settings {
 
@@ -18,6 +21,7 @@ struct SettingsHost {
         checkForUpdates;
     std::function<void()> hotkeysChanged;  // apos editar atalhos (Wave 3 re-registra)
     std::function<void(const std::wstring& profileName)> applyProfile;  // roteia o perfil
+    std::function<std::vector<DeviceInfo>()> outputs;  // Render p/ nome amigavel
 };
 
 // Injeta os callbacks (pode ser chamado antes de show()). Reconfiguravel.

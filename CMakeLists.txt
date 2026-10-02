@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(SoundInt VERSION 0.1.0 LANGUAGES CXX)
+project(SoundInt VERSION 0.1.0 LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -53,7 +53,8 @@ target_link_libraries(core PUBLIC advapi32 shell32 shlwapi version)
 # Executavel (app de tray, subsystemo WINDOWS)
 # ---------------------------------------------------------------------------
 file(GLOB_RECURSE SOUNDINT_APP_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/app/*.cpp")
-add_executable(SoundInt WIN32 ${SOUNDINT_APP_SOURCES})
+# app.rc: icone multi-tamanho + VERSIONINFO (ver src/app/app.rc).
+add_executable(SoundInt WIN32 ${SOUNDINT_APP_SOURCES} "${CMAKE_SOURCE_DIR}/src/app/app.rc")
 target_include_directories(SoundInt PRIVATE "${CMAKE_SOURCE_DIR}/src" "${SOUNDINT_GENERATED_DIR}")
 target_link_libraries(SoundInt PRIVATE
     core audio ui update

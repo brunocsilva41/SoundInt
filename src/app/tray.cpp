@@ -6,6 +6,7 @@
 #include <shellapi.h>
 
 #include "app/messages.h"
+#include "app/resource.h"
 #include "core/log.h"
 
 namespace soundint {
@@ -38,7 +39,10 @@ bool Tray::init(HWND hwnd)
     nid.uID = kTrayIconId;
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     nid.uCallbackMessage = WM_APP_TRAY;
-    nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);  // Wave 4 troca o icone
+    nid.hIcon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCE(IDI_SOUNDINT));
+    if (!nid.hIcon) {
+        nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    }
     lstrcpynW(nid.szTip, L"SoundInt", static_cast<int>(ARRAYSIZE(nid.szTip)));
 
     if (!Shell_NotifyIconW(NIM_ADD, &nid)) {

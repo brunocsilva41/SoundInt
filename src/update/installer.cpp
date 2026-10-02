@@ -1,5 +1,5 @@
 // ============================================================================
-// Spawn do instalador (Track F) — CreateProcessW em modo silencioso NSIS.
+// Spawn do instalador (Track F) — CreateProcessW em modo silencioso Inno Setup.
 // ============================================================================
 #include "update/installer.h"
 

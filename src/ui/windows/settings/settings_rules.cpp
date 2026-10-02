@@ -1,6 +1,7 @@
 // ============================================================================
 // Pagina Regras (Track K): lista de regras por app + adicao/remocao.
-// Sem audio no track: o destino exibe o deviceId textual (vazio = padrao).
+// O destino exibe o nome amigavel da saida (host().outputs); se o endpoint
+// estiver offline/desconhecido, cai para o deviceId textual (vazio = padrao).
 // ============================================================================
 #include "ui/windows/settings/settings_page.h"
 
@@ -73,11 +74,13 @@ protected:
 private:
     void rebuildRows();
     void addRule();
+    std::wstring friendlyTarget(const std::wstring& deviceId) const;
 
     TextField field_;
     controls::Button addButton_;
     std::vector<std::unique_ptr<RuleRow>> rows_;
     std::vector<RowGeom> geoms_;
+    std::vector<DeviceInfo> outputs_;   // cache p/ nome amigavel do destino
 
     std::wstring hint_;
     std::wstring status_;
@@ -94,6 +97,10 @@ void RulesPage::rebuildRows()
     controls_.push_back(&addButton_);
     controls_.push_back(&field_);
     rows_.clear();
+
+    if (host().outputs) {
+        outputs_ = host().outputs();
+    }
 
     const auto& rules = core::Store::instance().rules();
     for (const soundint::AppRule& rule : rules) {
@@ -152,6 +159,19 @@ void RulesPage::addRule()
     status_ = tr(L"settings.rules.added");
     syncImpl();
     requestRender();
+}
+
+std::wstring RulesPage::friendlyTarget(const std::wstring& deviceId) const
+{
+    if (deviceId.empty()) {
+        return std::wstring(tr(L"settings.rules.systemDefault"));
+    }
+    for (const DeviceInfo& device : outputs_) {
+        if (_wcsicmp(device.id.c_str(), deviceId.c_str()) == 0) {
+            return device.friendlyName;
+        }
+    }
+    return deviceId;   // endpoint offline/desconhecido: id cru como fallback
 }
 
 void RulesPage::layoutImpl(const Rect& area, float /*scale*/)
@@ -236,11 +256,8 @@ void RulesPage::renderImpl(IRenderTarget& rt, const tokens::Palette& palette)
                  tokens::kWeightRegular, palette.textPrimary);
         drawText(rt, geom.arrow, L"\u2192", palette, tokens::kFontBody,
                  tokens::kWeightRegular, palette.textSecondary, TextStyle::Align::Center);
-        const std::wstring target =
-            rule.deviceId.empty() ? std::wstring(tr(L"settings.rules.systemDefault"))
-                                  : rule.deviceId;
-        drawText(rt, geom.target, target, palette, tokens::kFontBody,
-                 tokens::kWeightRegular, palette.textSecondary);
+        drawText(rt, geom.target, friendlyTarget(rule.deviceId), palette,
+                 tokens::kFontBody, tokens::kWeightRegular, palette.textSecondary);
     }
 }
 

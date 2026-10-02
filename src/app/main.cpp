@@ -11,6 +11,7 @@
 
 #include "app/hotkeys.h"
 #include "app/messages.h"
+#include "app/resource.h"
 #include "app/router.h"
 #include "app/services.h"
 #include "app/services_ext.h"
@@ -106,6 +107,11 @@ void wireUi(AppShell& shell, HWND window, soundint::core::Store& config)
     modalHost.outputs = []() {
         return soundint::audioService().devices(soundint::Flow::Render);
     };
+    // Diagnostico de boot: ids GetId reais das saidas (ajuda a casar regras).
+    for (const soundint::DeviceInfo& device : modalHost.outputs()) {
+        SI_LOG_INFO("audio",
+                    L"saida: " + device.friendlyName + L" [" + device.id + L"]");
+    }
     modalHost.defaultOutput = []() {
         return soundint::audioService().defaultDevice(soundint::Flow::Render,
                                                        Role::Multimedia);
@@ -156,7 +162,30 @@ void wireUi(AppShell& shell, HWND window, soundint::core::Store& config)
         device.id = deviceId;
         return setDefault(device);
     };
-    mixerHost.routeApp = modalHost.routeApp;
+    // O mixer e o "filtro" por app: rotear na listagem grava a AppRule
+    // persistente (o router re-aplica em futuras sessoes via store->findRule).
+    // O modal mantem o proprio fluxo com checkbox "lembrar escolha".
+    mixerHost.routeApp = [live = modalHost.routeApp](uint32_t pid,
+                                                     const std::wstring& deviceId) {
+        if (live && !live(pid, deviceId)) {
+            return false;
+        }
+        for (const soundint::SessionInfo& session :
+             soundint::audioService().sessions(soundint::Flow::Render)) {
+            if (session.pid == pid && !session.systemSounds &&
+                !session.processName.empty()) {
+                soundint::AppRule rule;
+                rule.enabled = true;
+                rule.processName =
+                    soundint::ui::settings::normalizeProcessName(session.processName);
+                rule.deviceId = deviceId;
+                soundint::store().upsertRule(rule);
+                persist();
+                break;
+            }
+        }
+        return true;
+    };
     mixerHost.setVolume = [](const std::wstring& instanceId, float volume) {
         return soundint::audioService().setSessionVolume(instanceId, volume);
     };
@@ -168,6 +197,7 @@ void wireUi(AppShell& shell, HWND window, soundint::core::Store& config)
 
     // --- configuracoes ------------------------------------------------------
     soundint::ui::settings::SettingsHost settingsHost;
+    settingsHost.outputs = modalHost.outputs;
     settingsHost.checkForUpdates =
         [](std::function<void(bool, const std::wstring&)> done) {
             const bool beta = soundint::store().settings().betaChannel;
@@ -342,7 +372,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     wc.lpfnWndProc = wndProc;
     wc.hInstance = instance;
     wc.lpszClassName = kWindowClass;
-    wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    wc.hIcon = LoadIconW(instance, MAKEINTRESOURCE(IDI_SOUNDINT));
+    if (!wc.hIcon) {
+        wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    }
+    wc.hIconSm = wc.hIcon;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     if (RegisterClassExW(&wc) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
         if (comInitialized) {
