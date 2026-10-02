@@ -1,5 +1,6 @@
 #include "ui/windows/window_base.h"
 
+#include "core/log.h"
 #include "core/store.h"
 #include "ui/palette.h"
 
@@ -129,6 +130,9 @@ bool WindowBase::create(HINSTANCE instance, const wchar_t* className, DWORD exSt
         wc.hbrBackground = nullptr;
         wc.lpszClassName = className;
         if (!RegisterClassExW(&wc)) {
+            SI_LOG_ERROR("ui", std::wstring(L"WindowBase: RegisterClassExW falhou (") +
+                                   className + L", erro " +
+                                   std::to_wstring(GetLastError()) + L")");
             return false;
         }
     }
@@ -136,6 +140,9 @@ bool WindowBase::create(HINSTANCE instance, const wchar_t* className, DWORD exSt
     hwnd_ = CreateWindowExW(exStyle, className, L"", style | WS_CLIPCHILDREN, 0, 0, 100,
                             100, nullptr, nullptr, instance, this);
     if (!hwnd_) {
+        SI_LOG_ERROR("ui", std::wstring(L"WindowBase: CreateWindowExW falhou (") +
+                               className + L", erro " +
+                               std::to_wstring(GetLastError()) + L")");
         return false;
     }
 
@@ -285,6 +292,11 @@ LRESULT CALLBACK WindowBase::wndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
         auto* create = reinterpret_cast<CREATESTRUCTW*>(l);
         self = static_cast<WindowBase*>(create->lpCreateParams);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+        if (self) {
+            // hwnd_ ainda e nulo aqui; DefWindowProc/WM_SIZE rodam DURANTE a
+            // CreateWindowExW — sem este assignment a criacao falha (erro 1400).
+            self->hwnd_ = hwnd;
+        }
     }
     if (self) {
         return self->handle(msg, w, l);

@@ -19,6 +19,13 @@ constexpr wchar_t kLicenseUrl[] =
 constexpr wchar_t kIssuesUrl[] =
     L"https://github.com/brunocsilva41/SoundInt/issues/new";
 
+// Icones locais (Segoe MDL2/Fluent): licenca=documento, repo=codigo,
+// problema=aviso, logs=pasta.
+constexpr wchar_t kIconLicense[] = L"\uE774";   // Document
+constexpr wchar_t kIconRepo[] = L"\uE943";      // Code
+constexpr wchar_t kIconIssue[] = L"\uE7BA";     // Warning
+constexpr wchar_t kIconLogs[] = L"\uE8B7";      // OpenFolderHorizontal
+
 void openUrl(const wchar_t* url)
 {
     ShellExecuteW(nullptr, L"open", url, nullptr, nullptr, SW_SHOWNORMAL);
@@ -42,6 +49,11 @@ public:
             ShellExecuteW(nullptr, L"open", L"explorer.exe", params.c_str(), nullptr,
                           SW_SHOWNORMAL);
         });
+
+        licenseButton_.setGlyph(kIconLicense);
+        repoButton_.setGlyph(kIconRepo);
+        issueButton_.setGlyph(kIconIssue);
+        logsButton_.setGlyph(kIconLogs);
 
         controls_.push_back(&licenseButton_);
         controls_.push_back(&repoButton_);

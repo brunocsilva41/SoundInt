@@ -22,8 +22,9 @@ inline constexpr UINT WM_APP_TRAY = WM_APP + 3;
 
 // Tags de WM_APP_SHOW_REQUEST.
 enum ShowRequest : WPARAM {
-    kShowRequestMain = 1,      // mostrar a janela principal
+    kShowRequestMain = 1,      // segunda instancia / "Abrir" -> janela principal
     kShowRequestSettings = 2,  // abrir a tela de configuracoes
+    kShowRequestMixer = 3,     // flyout do mixer (clique esquerdo na tray/atalho)
 };
 
 }  // namespace soundint

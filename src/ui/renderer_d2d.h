@@ -181,12 +181,16 @@ private:
     bool createTarget(WindowState& state);
     void releaseTarget(WindowState& state);
     IDWriteTextFormat* formatFor(const TextStyle& style);
+    // Familia real de icones: "Segoe Fluent Icons" (Win11) com fallback para
+    // "Segoe MDL2 Assets" (Win10) — resolvida uma vez via colecao do sistema.
+    const std::wstring& iconFamily();
 
     bool initialized_ = false;
     ComRef<ID2D1Factory> d2dFactory_;
     ComRef<IDWriteFactory> dwriteFactory_;
     TextFormatCache formats_;
     std::unordered_map<HWND, WindowState> windows_;
+    std::wstring iconFamily_;
 };
 
 }  // namespace soundint::ui

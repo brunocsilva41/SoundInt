@@ -83,7 +83,7 @@ bool Tray::handleMessage(HWND hwnd, WPARAM /*wParam*/, LPARAM lParam)
         case WM_LBUTTONDBLCLK:
         case NIN_SELECT:
         case NIN_KEYSELECT:
-            showRequest(hwnd, kShowRequestMain);
+            showRequest(hwnd, kShowRequestMixer);  // clique esquerdo = mixer
             return true;
         case WM_RBUTTONUP:
         case WM_CONTEXTMENU:
@@ -106,7 +106,7 @@ void Tray::showMenu(HWND hwnd)
     if (menu == nullptr) {
         return;
     }
-    AppendMenuW(menu, MF_STRING, kCmdOpen, L"Abrir");
+    AppendMenuW(menu, MF_STRING, kCmdOpen, L"Mixer");
     AppendMenuW(menu, MF_STRING, kCmdSettings, L"Configurações");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kCmdExit, L"Sair");
@@ -120,13 +120,14 @@ void Tray::showMenu(HWND hwnd)
 
     switch (command) {
         case kCmdOpen:
-            showRequest(hwnd, kShowRequestMain);
+            showRequest(hwnd, kShowRequestMixer);
             break;
         case kCmdSettings:
             showRequest(hwnd, kShowRequestSettings);
             break;
         case kCmdExit:
-            PostMessageW(hwnd, WM_CLOSE, 0, 0);
+            // wParam != 0 = saida explicita (ignora close-to-tray).
+            PostMessageW(hwnd, WM_CLOSE, 1, 0);
             break;
         default:
             break;  // menu cancelado (0)

@@ -206,8 +206,9 @@ void D2dRenderTarget::drawGlyph(std::wstring_view glyph, const Rect& box, const 
         return;
     }
     TextStyle iconStyle = style;
-    iconStyle.fontFamily = tokens::kFontIcons;
-    iconStyle.weight = tokens::kWeightRegular;   // Segoe Fluent Icons so tem regular
+    iconStyle.fontFamily = owner_ != nullptr ? owner_->iconFamily()
+                                              : std::wstring(tokens::kFontIcons);
+    iconStyle.weight = tokens::kWeightRegular;   // fontes de icone so tem regular
     iconStyle.align = TextStyle::Align::Center;
     iconStyle.valign = TextStyle::VAlign::Middle;
     iconStyle.wrap = false;
@@ -472,6 +473,30 @@ void RendererD2d::endPaint(HWND hwnd)
 // ---------------------------------------------------------------------------
 // RendererD2d — cache de formatos de texto
 // ---------------------------------------------------------------------------
+const std::wstring& RendererD2d::iconFamily()
+{
+    if (!iconFamily_.empty()) {
+        return iconFamily_;
+    }
+    iconFamily_ = tokens::kFontIcons;   // padrao: Win11
+    ComRef<IDWriteFontCollection> collection;
+    if (dwriteFactory_ &&
+        SUCCEEDED(dwriteFactory_->GetSystemFontCollection(collection.put(), false))) {
+        const auto exists = [&collection](const wchar_t* name) {
+            UINT index = 0;
+            BOOL found = FALSE;
+            return SUCCEEDED(collection->FindFamilyName(name, &index, &found)) && found;
+        };
+        if (!exists(tokens::kFontIcons)) {
+            // Win10: Segoe MDL2 Assets (mesmos codepoints U+E7xx/U+E9xx).
+            if (exists(L"Segoe MDL2 Assets")) {
+                iconFamily_ = L"Segoe MDL2 Assets";
+            }
+        }
+    }
+    return iconFamily_;
+}
+
 IDWriteTextFormat* RendererD2d::formatFor(const TextStyle& style)
 {
     if (!dwriteFactory_) {
