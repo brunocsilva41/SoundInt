@@ -14,7 +14,7 @@ Somente as ultimas releases estaveis recebem correcoes de seguranca. Builds
 
 **Nao abra uma issue publica.** Reporte em privado por um dos canais:
 
-1. **Recomendado**: [GitHub Security Advisories](https://github.com/OWNER/SoundInt/security/advisories/new)
+1. **Recomendado**: [GitHub Security Advisories](https://github.com/brunocsilva41/SoundInt/security/advisories/new)
    ("Report a vulnerability").
 2. **Email**: ybrunooh@gmail.com — assunto `[SECURITY] SoundInt`.
 

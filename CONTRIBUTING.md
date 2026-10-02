@@ -99,6 +99,39 @@ partir desses commits (`cliff.toml`).
 6. CI (`CI` workflow) precisa passar antes do merge.
 7. Revisao obrigatoria: pelo menos 1 aprovacao.
 
+## Regras de sucesso no CI/CD
+
+O branch `main` e protegido por **ruleset** (`protecao-main`). Um PR so e
+mergeavel quando **todas** as condicoes abaixo forem verdadeiras:
+
+| Regra | Detalhe |
+| --- | --- |
+| Checks obrigatorios | `1 - build (Windows x64 Debug)`, `2 - test (core)`, `2 - test (audio)`, `2 - test (ui)`, `2 - test (update)`, `2 - test (app)`, `2 - test (full)` — todos `success` |
+| Aprovacao | 1 aprovacao com review atualizado (stale review descartado no push) |
+| Branch atualizada | o PR precisa estar atualizado com `main` antes do merge |
+| Conversas resolvidas | todos os threads do review marcados como resolvidos |
+| Delecao/force-push | bloqueados em `main` |
+
+Detalhes de cada workflow (CI, nightly, release) em
+[`docs/release-process.md`](docs/release-process.md).
+
+**Como a CI evita "sucesso falso":**
+
+- A matriz de testes usa `fail-fast: false`: cada parte (`core`, `audio`,
+  `ui`, `update`, `app`, `full`) reporta o **proprio** resultado — uma suite
+  vermelha nunca esconde as demais nem e substituida por um job agregador.
+- Em falha, a CI sobe artefatos de log do job que falhou (procure o
+  artefato `ci-*-failure-*` na run).
+- `Re-run failed jobs` refaz somente o que falhou (o build e reaproveitado).
+- Releases so saem de tag `v*` validada: CHANGELOG, build, suítes, SHA256,
+  attestation de proveniencia e **aprovacao manual** no environment
+  `production` antes de virar release publica.
+- O updater só anuncia versao cujo asset existe na release com SHA256
+  correspondente — release malformada nunca chega ao usuario.
+
+Se a CI falhar num job de infraestrutura (runner do GitHub, rede), re-run e
+legitimo; se falhar num teste, corrija o codigo — nao desative o teste.
+
 ## Agentes de IA
 
 Contribuicoes geradas por agentes seguem [`AGENTS.md`](AGENTS.md):

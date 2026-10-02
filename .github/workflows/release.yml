@@ -49,7 +49,7 @@ jobs:
       can_sign: ${{ steps.secrets.outputs.can_sign }}
     steps:
       - name: Checkout (tag da release)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
 
@@ -95,7 +95,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout (tag da release)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
 
@@ -135,7 +135,7 @@ jobs:
           ctest --test-dir build -C Release --output-on-failure
 
       - name: Publicar binario (artefato)
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: release-build
           path: build/Release/SoundInt.exe
@@ -151,12 +151,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout (tag da release)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
 
       - name: Baixar binario
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: release-build
           path: build/Release
@@ -254,7 +254,7 @@ jobs:
           Write-Host "manifest ok: $($manifest.sha256) ($($manifest.sizeBytes) bytes)"
 
       - name: Publicar artefatos da release
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: release-package
           path: |
@@ -279,18 +279,18 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout (tag da release)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
 
       - name: Baixar pacote e binario
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: release-package
           path: pkg
 
       - name: Baixar build Release
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: release-build
           path: build/Release
@@ -383,7 +383,7 @@ jobs:
             Set-Content -Path (Join-Path 'pkg' 'update-manifest.json') -Encoding utf8
 
       - name: Republicar artefatos (assinados)
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: release-package
           path: |
@@ -410,12 +410,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout (tag da release)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
 
       - name: Baixar pacote
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: release-package
           path: pkg
