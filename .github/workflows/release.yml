@@ -453,7 +453,9 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace($text)) { $notes = $text }
           Set-Content -Path 'release-notes.md' -Value $notes -Encoding utf8
 
-          $assets = @(Get-ChildItem 'pkg' -File | ForEach-Object { $_.FullName })
+          # Recursivo: o instalador chega aninhado (pkg/installer/Output/...)
+          # e o Get-ChildItem nao-recursivo deixava ele de fora da release.
+          $assets = @(Get-ChildItem 'pkg' -File -Recurse | ForEach-Object { $_.FullName })
           if (-not $assets) { throw 'Nenhum asset em pkg/.' }
 
           # Verifica se ja existe release (rascunho ou publica) para a tag.
