@@ -483,6 +483,13 @@ jobs:
   publish:
     name: "6/6 publish"
     needs: [validate, draft]
+    # Precisa de if explicito com status function: sem ela o GitHub aplica
+    # success() implicito sobre TODA a cadeia (incluindo sign=skipped) e
+    # pulava o publish mesmo com validate+draft verdes.
+    if: >-
+      ${{ !cancelled() &&
+          needs.validate.result == 'success' &&
+          needs.draft.result == 'success' }}
     environment: production
     runs-on: windows-latest
     steps:
