@@ -12,6 +12,13 @@
 //  - registracao/unregistracao COM acontecem SEM o mutex (o OS pode esperar um
 //    callback que precisa do mesmo mutex => deadlock); leituras COM de estado
 //    podem rodar sob o mutex (nao disparam notificacao);
+//  - RegisterAudioSessionNotification NUNCA roda dentro de OnSessionCreated
+//    (contrato WASAPI: o manager segura o lock interno no callback; registrar
+//    ali trava nele). O caminho do callback insere o registro com events
+//    nulo, publica Created na hora (latencia do modal preservada) e enfileira
+//    o instanceId em m_pendingRegistrations; a main thread registra depois,
+//    via processPendingRegistrations() (chamado nos mesmos pontos que
+//    drainDead: sessions/setVolume/setMute/sync);
 //  - teardown disparado DENTRO de um callback vira pendencia (m_dead) e roda
 //    na main thread, via drainDead().
 // ============================================================================
@@ -76,7 +83,7 @@ class SessionWatcher : public std::enable_shared_from_this<SessionWatcher>
         SessionInfo info;
         IAudioSessionControl2* control = nullptr; // referencia propria
         ISimpleAudioVolume* volume = nullptr;     // referencia propria
-        SessionEvents* events = nullptr;          // propria + registrada
+        SessionEvents* events = nullptr; // propria + registrada; nulo ate o registro adiado
     };
 
     struct EndpointRecord
@@ -106,9 +113,10 @@ class SessionWatcher : public std::enable_shared_from_this<SessionWatcher>
     void syncEndpoint(const std::wstring& deviceId, bool publish);
     IAudioSessionManager2* setupEndpoint(const std::wstring& deviceId);
     bool createSession(const std::wstring& deviceId, IAudioSessionControl2* control,
-                       const std::wstring& instanceId, bool publish);
+                       const std::wstring& instanceId, bool publish, bool registerNow);
     SessionRecord* findSessionLocked(const std::wstring& instanceId);
     void drainDead();
+    void processPendingRegistrations();
     void publishSession(SessionChange what, const SessionInfo& info);
 
     IMMDeviceEnumerator* m_enumerator = nullptr;
@@ -116,6 +124,10 @@ class SessionWatcher : public std::enable_shared_from_this<SessionWatcher>
     mutable std::mutex m_mutex;
     std::map<std::wstring, EndpointRecord> m_endpoints;
     std::vector<DeadSession> m_dead;
+    // instanceIds inseridos pelo callback (events nulo) aguardando o Register
+    // na main thread. Falha de Register re-enfileira (retry); a entrada sai
+    // quando o registro anexa ou a sessao morre.
+    std::vector<std::wstring> m_pendingRegistrations;
     bool m_started = false;  // somente main thread
     bool m_stopping = false; // sempre com m_mutex travado
 };

@@ -260,3 +260,18 @@ rejeição de aspas vinda de env · `swprintf_s(buffer[192])` em
   necessário; ui/control.h (invalidate com dono) se Fase 1 #15 for atacado
 - Follow-ups: Fase 0 → Fase 1 → Fase 2 nesta ordem
 ```
+
+## Addendum — Fase 0 e Fase 1 aplicadas (2026-10-02)
+
+- **Fase 0** (commit `55add0c`): UAF `capture_`, tetos HTTP (1 MiB/512 MiB),
+  `try/catch` nas threads de update, snapshot do `beta`, updater https-only +
+  charset em `version`, reentry "Verificar agora", tetos EventBus/ícones,
+  renderer leaky, `CoTaskMemFree` incondicional, ordem `g_shell`/`g_hwnd`.
+- **Fase 1** (este commit): `RegisterAudioSessionNotification` fora do
+  `OnSessionCreated` (fila `m_pendingRegistrations`, `registerNow=false` no
+  callback, `processPendingRegistrations()` nos pontos de `drainDead`);
+  `buildSessionInfo` fora do `m_mutex` (+ releitura barata de volume no
+  insert); poda de zumbis sem eventos em `syncInternal`; mixer não
+  reconstrói oculto; `Store::save()` com dedup por conteúdo (só regrava o
+  arquivo que mudou).
+- Build `/W4` limpo, suíte 119/119, CI com os 7 checks verdes.

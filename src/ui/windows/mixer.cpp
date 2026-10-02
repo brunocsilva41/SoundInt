@@ -863,9 +863,16 @@ public:
     }
 
     // Reconstruicao adiada enquanto ha dispatch de evento ou captura de mouse.
+    // Janela oculta nao reconstrói: showFlyout() faz refresh completo ao
+    // abrir, entao reconstruir a cada AppEvent com o mixer fechado e so
+    // custo de COM/CPU (enumeracao de saidas + snapshot de sessoes).
     void requestRefresh()
     {
         if (dispatchDepth_ > 0 || capture_ != nullptr) {
+            refreshPending_ = true;
+            return;
+        }
+        if (!isVisible()) {
             refreshPending_ = true;
             return;
         }
@@ -1189,7 +1196,8 @@ private:
 
     void applyPendingRefresh()
     {
-        if (refreshPending_ && dispatchDepth_ == 0 && capture_ == nullptr) {
+        if (refreshPending_ && dispatchDepth_ == 0 && capture_ == nullptr &&
+            isVisible()) {
             refresh();
         }
     }

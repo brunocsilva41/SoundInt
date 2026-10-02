@@ -9,6 +9,7 @@
 #include <Windows.h>
 #include <shlobj.h>
 
+#include <map>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -127,6 +128,21 @@ bool writeFileAtomic(const std::wstring& path, std::string_view bytes)
     return true;
 }
 
+// Tamanho em disco confere com o esperado (guarda contra arquivo apagado ou
+// trocado por fora entre o ultimo write e este save).
+bool fileSizeEquals(const std::wstring& path, size_t bytes)
+{
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data) ||
+        (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+        return false;
+    }
+    ULARGE_INTEGER size{};
+    size.HighPart = data.nFileSizeHigh;
+    size.LowPart = data.nFileSizeLow;
+    return size.QuadPart == static_cast<ULONGLONG>(bytes);
+}
+
 // Serializa com indentacao; false se o dump falhar (nao grava lixo).
 bool dumpJson(const nlohmann::json& j, std::string& out)
 {
@@ -136,12 +152,6 @@ bool dumpJson(const nlohmann::json& j, std::string& out)
     } catch (...) {
         return false;
     }
-}
-
-bool writeJsonFile(const std::wstring& path, const nlohmann::json& j)
-{
-    std::string bytes;
-    return dumpJson(j, bytes) && writeFileAtomic(path, bytes);
 }
 
 }  // namespace
@@ -156,6 +166,29 @@ struct Store::Impl {
     std::vector<ArrivalRule> arrivalRules;
     std::vector<Profile> profiles;
     std::wstring lastManualDefaultDevice;
+    // Ultimo conteudo gravado por arquivo (chamar com o mutex). save() pula
+    // os arquivos cujo conteudo nao mudou: um toggle de setting regravava os
+    // 4 arquivos (Create+flush+rename com WRITE_THROUGH) na UI thread.
+    std::map<std::wstring, std::string> lastWritten;
+
+    // Grava so se o conteudo mudou desde a ultima gravacao/leitura.
+    bool writeCached(const std::wstring& path, const nlohmann::json& j)
+    {
+        std::string bytes;
+        if (!dumpJson(j, bytes)) {
+            return false;
+        }
+        const auto it = lastWritten.find(path);
+        if (it != lastWritten.end() && it->second == bytes &&
+            fileSizeEquals(path, bytes.size())) {
+            return true; // disco ja tem exatamente este conteudo
+        }
+        if (!writeFileAtomic(path, bytes)) {
+            return false;
+        }
+        lastWritten[path] = std::move(bytes);
+        return true;
+    }
 };
 
 // ---------------------------------------------------------------------------
@@ -214,7 +247,7 @@ bool Store::load()
         if (state == FileState::Missing) {
             impl_->settings = codec::defaultSettings();
             impl_->lastManualDefaultDevice.clear();
-            if (!writeJsonFile(path, codec::settingsToJson({impl_->settings, {}}))) {
+            if (!impl_->writeCached(path, codec::settingsToJson({impl_->settings, {}}))) {
                 ok = false;
             }
         } else if (state == FileState::ReadError) {
@@ -228,6 +261,7 @@ bool Store::load()
                 impl_->lastManualDefaultDevice.clear();
                 ok = false;
             } else {
+                impl_->lastWritten[path] = bytes; // base para o dedup do save()
                 const SettingsDoc doc = codec::settingsFromJson(j);
                 impl_->settings = doc.settings;
                 impl_->lastManualDefaultDevice = doc.lastManualDefaultDevice;
@@ -241,7 +275,7 @@ bool Store::load()
         const FileState state = readFileRaw(path, bytes);
         if (state == FileState::Missing) {
             impl_->rules.clear();
-            if (!writeJsonFile(path, codec::rulesToJson({}))) {
+            if (!impl_->writeCached(path, codec::rulesToJson({}))) {
                 ok = false;
             }
         } else if (state == FileState::ReadError) {
@@ -254,6 +288,7 @@ bool Store::load()
                 impl_->rules.clear();
                 ok = false;
             } else {
+                impl_->lastWritten[path] = bytes;
                 impl_->rules = codec::rulesFromJson(j);
             }
         }
@@ -265,7 +300,7 @@ bool Store::load()
         const FileState state = readFileRaw(path, bytes);
         if (state == FileState::Missing) {
             impl_->arrivalRules.clear();
-            if (!writeJsonFile(path, codec::arrivalRulesToJson({}))) {
+            if (!impl_->writeCached(path, codec::arrivalRulesToJson({}))) {
                 ok = false;
             }
         } else if (state == FileState::ReadError) {
@@ -278,6 +313,7 @@ bool Store::load()
                 impl_->arrivalRules.clear();
                 ok = false;
             } else {
+                impl_->lastWritten[path] = bytes;
                 impl_->arrivalRules = codec::arrivalRulesFromJson(j);
             }
         }
@@ -289,7 +325,7 @@ bool Store::load()
         const FileState state = readFileRaw(path, bytes);
         if (state == FileState::Missing) {
             impl_->profiles.clear();
-            if (!writeJsonFile(path, codec::profilesToJson({}))) {
+            if (!impl_->writeCached(path, codec::profilesToJson({}))) {
                 ok = false;
             }
         } else if (state == FileState::ReadError) {
@@ -302,6 +338,7 @@ bool Store::load()
                 impl_->profiles.clear();
                 ok = false;
             } else {
+                impl_->lastWritten[path] = bytes;
                 impl_->profiles = codec::profilesFromJson(j);
             }
         }
@@ -321,12 +358,13 @@ bool Store::save() const
         ensureDir(dir);
 
         const SettingsDoc doc{ impl_->settings, impl_->lastManualDefaultDevice };
-        const bool s1 = writeJsonFile(dir + kSettingsFile, codec::settingsToJson(doc));
-        const bool s2 = writeJsonFile(dir + kRulesFile, codec::rulesToJson(impl_->rules));
-        const bool s3 =
-            writeJsonFile(dir + kArrivalFile, codec::arrivalRulesToJson(impl_->arrivalRules));
-        const bool s4 =
-            writeJsonFile(dir + kProfilesFile, codec::profilesToJson(impl_->profiles));
+        // writeCached: pula os arquivos sem mudanca (menos I/O na UI thread).
+        const bool s1 = impl_->writeCached(dir + kSettingsFile, codec::settingsToJson(doc));
+        const bool s2 = impl_->writeCached(dir + kRulesFile, codec::rulesToJson(impl_->rules));
+        const bool s3 = impl_->writeCached(dir + kArrivalFile,
+                                           codec::arrivalRulesToJson(impl_->arrivalRules));
+        const bool s4 = impl_->writeCached(dir + kProfilesFile,
+                                           codec::profilesToJson(impl_->profiles));
         return s1 && s2 && s3 && s4;
     } catch (...) {
         return false;  // serializacao inesperada nao pode derrubar o app

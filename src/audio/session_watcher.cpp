@@ -4,6 +4,8 @@
 //  - IAudioSessionEvents por sessao -> VolumeChanged / StateChanged / Removed;
 //  - GetSessionEnumerator = estado inicial (SEM publicar Created).
 // Os callbacks chegam em threads de sistema: trabalho minimo + publish.
+// RegisterAudioSessionNotification nunca roda no callback (contrato WASAPI);
+// fica pendente em m_pendingRegistrations ate a main thread processar.
 // ============================================================================
 #include "audio/session_watcher.h"
 
@@ -73,8 +75,30 @@ std::wstring resolveIndirectString(const std::wstring& raw)
     return buffer;
 }
 
-// Preenche SessionInfo completo. Chamado SEMPRE com m_mutex travado: as
-// chamadas aqui sao apenas leituras (nao disparam notificacao de volta).
+// Releitura barata de volume/mute (getters sem notificacao; pode rodar sob o
+// mutex). Usada no build inicial e para fechar a janela entre o build fora do
+// lock e a insercao no mapa.
+void refreshVolumeState(ISimpleAudioVolume* volume, SessionInfo& out)
+{
+    if (volume == nullptr)
+    {
+        return;
+    }
+    float level = 1.0f;
+    BOOL muted = FALSE;
+    if (SUCCEEDED(volume->GetMasterVolume(&level)))
+    {
+        out.volume = util::clampVolume(level);
+    }
+    if (SUCCEEDED(volume->GetMute(&muted)))
+    {
+        out.muted = (muted != FALSE);
+    }
+}
+
+// Preenche SessionInfo completo. Roda SEM m_mutex: OpenProcess, registro e
+// disco nao podem bloquear quem precisa do mapa. So faz leituras (nenhuma
+// disparam notificacao de volta ao manager).
 void buildSessionInfo(const std::wstring& deviceId, const std::wstring& instanceId,
                       IAudioSessionControl2* control, ISimpleAudioVolume* volume, SessionInfo& out)
 {
@@ -127,19 +151,7 @@ void buildSessionInfo(const std::wstring& deviceId, const std::wstring& instance
         out.active = (state == AudioSessionStateActive);
     }
 
-    if (volume != nullptr)
-    {
-        float level = 1.0f;
-        BOOL muted = FALSE;
-        if (SUCCEEDED(volume->GetMasterVolume(&level)))
-        {
-            out.volume = util::clampVolume(level);
-        }
-        if (SUCCEEDED(volume->GetMute(&muted)))
-        {
-            out.muted = (muted != FALSE);
-        }
-    }
+    refreshVolumeState(volume, out);
 }
 
 } // namespace
@@ -403,6 +415,7 @@ void SessionWatcher::stop()
         m_stopping = true;
         endpoints.swap(m_endpoints);
         dead.swap(m_dead);
+        m_pendingRegistrations.clear(); // so instanceIds, sem referencias
     }
 
     // Teardown fora do mutex: o OS pode esperar callbacks em voo, e esses
@@ -427,6 +440,7 @@ void SessionWatcher::stop()
 std::vector<SessionInfo> SessionWatcher::sessions(Flow flow)
 {
     drainDead();
+    processPendingRegistrations();
     std::vector<SessionInfo> out;
     if (flow != Flow::Render)
     {
@@ -451,6 +465,7 @@ std::vector<SessionInfo> SessionWatcher::sessions(Flow flow)
 bool SessionWatcher::setVolume(const std::wstring& instanceId, float volume)
 {
     drainDead();
+    processPendingRegistrations();
     ISimpleAudioVolume* target = nullptr;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -472,6 +487,7 @@ bool SessionWatcher::setVolume(const std::wstring& instanceId, float volume)
 bool SessionWatcher::setMute(const std::wstring& instanceId, bool mute)
 {
     drainDead();
+    processPendingRegistrations();
     ISimpleAudioVolume* target = nullptr;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -508,8 +524,12 @@ void SessionWatcher::handleSessionCreated(const std::wstring& deviceId,
     const std::wstring instanceId = readInstanceId(control2);
     if (!instanceId.empty())
     {
-        // Dedup + publicacao de Created rodam dentro de createSession.
-        createSession(deviceId, control2, instanceId, /*publish=*/true);
+        // Roda na thread do WASAPI: registerNow=false — o Register fica
+        // pendente para a main thread (contrato WASAPI). O Created publica
+        // na hora e o proprio evento acorda a main (router/mixer chamam
+        // sessions(), que processa a pendencia).
+        createSession(deviceId, control2, instanceId, /*publish=*/true,
+                      /*registerNow=*/false);
     }
     control2->Release();
 }
@@ -592,6 +612,12 @@ void SessionWatcher::handleSessionDisconnected(const std::wstring& instanceId)
         if (found)
         {
             m_dead.push_back(dead);
+            // A sessao morreu antes do registro adiado: tira da fila para
+            // nao registrar um controle morto (o Removed publica abaixo).
+            m_pendingRegistrations.erase(
+                std::remove(m_pendingRegistrations.begin(), m_pendingRegistrations.end(),
+                            instanceId),
+                m_pendingRegistrations.end());
         }
     }
     // O Unregister/Release real roda na main thread (drainDead): nunca
@@ -665,7 +691,53 @@ bool SessionWatcher::syncInternal(bool initial)
         syncEndpoint(deviceId, publish);
     }
 
-    // 3) pendencias deixadas por callbacks de desconexao.
+    // 3) registros adiados pelo caminho do callback.
+    processPendingRegistrations();
+
+    // 4) poda de zumbis: registros SEM eventos (Register falhou ou a sessao
+    //    morreu antes dele) cujo controle ja nao responde a GetState. Com
+    //    events, o proprio OnSessionDisconnected limpa — mexer neles aqui
+    //    arriscaria remocao indevida + Created duplicado no proximo sync.
+    std::vector<DeadSession> zombies;
+    std::vector<SessionInfo> zombieInfos;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (auto& [deviceId, endpoint] : m_endpoints)
+        {
+            (void)deviceId;
+            auto session = endpoint.sessions.begin();
+            while (session != endpoint.sessions.end())
+            {
+                SessionRecord& record = session->second;
+                AudioSessionState state = AudioSessionStateInactive;
+                const bool zombie = (record.events == nullptr && record.control != nullptr &&
+                                     FAILED(record.control->GetState(&state)));
+                if (zombie)
+                {
+                    zombieInfos.push_back(record.info);
+                    zombies.push_back(takeDead(record));
+                    session = endpoint.sessions.erase(session);
+                }
+                else
+                {
+                    ++session;
+                }
+            }
+        }
+    }
+    for (const DeadSession& item : zombies)
+    {
+        releaseDead(item);
+    }
+    if (publish)
+    {
+        for (const SessionInfo& info : zombieInfos)
+        {
+            publishSession(SessionChange::Removed, info);
+        }
+    }
+
+    // 5) pendencias deixadas por callbacks de desconexao.
     drainDead();
     return true;
 }
@@ -737,7 +809,8 @@ void SessionWatcher::syncEndpoint(const std::wstring& deviceId, bool publish)
         if (!instanceId.empty())
         {
             found.insert(instanceId);
-            createSession(deviceId, control2, instanceId, publish); // dedup interno
+            // Main thread: pode registrar na hora (dedup interno).
+            createSession(deviceId, control2, instanceId, publish, /*registerNow=*/true);
         }
         control2->Release();
     }
@@ -843,26 +916,41 @@ IAudioSessionManager2* SessionWatcher::setupEndpoint(const std::wstring& deviceI
 }
 
 bool SessionWatcher::createSession(const std::wstring& deviceId, IAudioSessionControl2* control,
-                                   const std::wstring& instanceId, bool publish)
+                                   const std::wstring& instanceId, bool publish, bool registerNow)
 {
-    // 1) Registra os eventos ANTES de publicar o registro. Mudancas nessa
-    //    janela nao acham o registro e caiem no estado lido no passo 2, que
-    //    e sempre posterior - nada se perde.
+    // 1) Volume (QI simples, sem lock).
     ISimpleAudioVolume* volume = nullptr;
     control->QueryInterface(__uuidof(ISimpleAudioVolume), reinterpret_cast<void**>(&volume));
 
-    auto* events = new SessionEvents(shared_from_this(), instanceId); // ref = 1
-    const HRESULT hr = control->RegisterAudioSessionNotification(events);
-    const bool registered = SUCCEEDED(hr);
-    if (!registered)
+    // 2) Registro dos eventos ANTES de publicar o registro — mas NUNCA dentro
+    //    de callback WASAPI: o manager segura o lock interno durante
+    //    OnSessionCreated e RegisterAudioSessionNotification travaria nele
+    //    (contrato MSDN). No caminho do callback (registerNow=false) o
+    //    registro fica pendente para a main thread e events nasce nulo.
+    SessionEvents* events = nullptr;
+    bool registered = false;
+    if (registerNow)
     {
-        util::debugFailure(L"IAudioSessionControl::RegisterAudioSessionNotification", hr);
-        events->Release();
-        events = nullptr;
+        events = new SessionEvents(shared_from_this(), instanceId); // ref = 1
+        const HRESULT hr = control->RegisterAudioSessionNotification(events);
+        registered = SUCCEEDED(hr);
+        if (!registered)
+        {
+            util::debugFailure(L"IAudioSessionControl::RegisterAudioSessionNotification", hr);
+            events->Release();
+            events = nullptr;
+        }
     }
 
-    // 2) Leitura do estado + insercao atomicas sob o mutex: um callback que
-    //    chegue agora bloqueia e reescreve por cima, entao nao ha corrida.
+    // 3) Leitura do estado SEM o mutex: processo/registro/disco nao bloqueiam
+    //    a main thread. Mudancas nessa janela nao acham o registro ainda e
+    //    caem na releitura barata do passo 4 — nada se perde.
+    SessionInfo built;
+    buildSessionInfo(deviceId, instanceId, control, volume, built);
+
+    // 4) Insercao sob o mutex + releitura de volume/mute (getters sem
+    //    notificacao, permitidos sob o mutex): um callback que chegue agora
+    //    bloqueia e reescreve por cima, entao nao ha corrida.
     bool inserted = false;
     SessionInfo created;
     {
@@ -873,16 +961,19 @@ bool SessionWatcher::createSession(const std::wstring& deviceId, IAudioSessionCo
             if (endpoint != m_endpoints.end() && endpoint->second.sessions.count(instanceId) == 0)
             {
                 SessionRecord record;
-                record.info.instanceId = instanceId;
-                record.info.deviceId = deviceId;
-                buildSessionInfo(deviceId, instanceId, control, volume, record.info);
+                record.info = built;
                 control->AddRef(); // referencia propria do registro
                 record.control = control;
                 record.volume = volume; // o QI ja devolveu a referencia
                 record.events = events;
+                refreshVolumeState(volume, record.info);
                 created = record.info;
                 endpoint->second.sessions.emplace(instanceId, std::move(record));
                 inserted = true;
+                if (!registerNow)
+                {
+                    m_pendingRegistrations.push_back(instanceId);
+                }
             }
         }
     }
@@ -909,6 +1000,80 @@ bool SessionWatcher::createSession(const std::wstring& deviceId, IAudioSessionCo
         publishSession(SessionChange::Created, created);
     }
     return true;
+}
+
+// Main thread (mesmos pontos que drainDead). Anexa os SessionEvents adiados
+// pelo caminho do callback: registra fora do mutex e transfere a posse para
+// o registro. Falha re-enfileira (retry barato); sessao sumida descarta.
+void SessionWatcher::processPendingRegistrations()
+{
+    std::vector<std::wstring> batch;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_pendingRegistrations.empty())
+        {
+            return;
+        }
+        batch.swap(m_pendingRegistrations);
+    }
+
+    for (const std::wstring& instanceId : batch)
+    {
+        IAudioSessionControl2* control = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_stopping)
+            {
+                return; // stop() derruba os registros; o resto e descartado
+            }
+            SessionRecord* record = findSessionLocked(instanceId);
+            if (record != nullptr && record->events == nullptr && record->control != nullptr)
+            {
+                control = record->control;
+                control->AddRef(); // referencia propria: solta o mutex antes da chamada
+            }
+        }
+        if (control == nullptr)
+        {
+            continue; // sessao sumiu antes do registro: descarta
+        }
+
+        SessionEvents* events = new SessionEvents(shared_from_this(), instanceId); // ref = 1
+        const bool ok = SUCCEEDED(control->RegisterAudioSessionNotification(events));
+        if (!ok)
+        {
+            util::debugFailure(L"IAudioSessionControl::RegisterAudioSessionNotification", E_FAIL);
+        }
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            SessionRecord* record = m_stopping ? nullptr : findSessionLocked(instanceId);
+            if (ok && record != nullptr && record->events == nullptr)
+            {
+                record->events = events; // posse transferida; registrado
+                events = nullptr;
+            }
+            else if (!ok && record != nullptr && record->events == nullptr && !m_stopping)
+            {
+                // Retry: a sessao vive mas o registro falhou (transiente).
+                // Dedup defensivo (a main thread e unica, mas barato).
+                if (std::find(m_pendingRegistrations.begin(), m_pendingRegistrations.end(),
+                              instanceId) == m_pendingRegistrations.end())
+                {
+                    m_pendingRegistrations.push_back(instanceId);
+                }
+            }
+            // Demais casos: a sessao sumiu no meio do caminho — desfaz abaixo.
+        }
+        if (events != nullptr)
+        {
+            if (ok)
+            {
+                control->UnregisterAudioSessionNotification(events);
+            }
+            events->Release();
+        }
+        control->Release();
+    }
 }
 
 // --- infra -----------------------------------------------------------------
