@@ -569,6 +569,11 @@ bool exeIconAvailable(const std::wstring& path)
     if (it != cache.end()) {
         return it->second;
     }
+    // Teto do cache: caminhos unicos nao devem crescer sem fim (uma sessao
+    // por path arbitrario lotaria o mapa). Ao estourar, limpa e refaz.
+    if (cache.size() >= 512) {
+        cache.clear();
+    }
 
     SHFILEINFOW info{};
     const DWORD_PTR ok = SHGetFileInfoW(path.c_str(), 0, &info, sizeof(info),

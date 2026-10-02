@@ -29,12 +29,12 @@ std::wstring readInstanceId(IAudioSessionControl2* control)
         return L"";
     }
     LPWSTR value = nullptr;
-    if (FAILED(control->GetSessionInstanceIdentifier(&value)) || value == nullptr)
-    {
-        return L"";
+    const HRESULT hr = control->GetSessionInstanceIdentifier(&value);
+    std::wstring result;
+    if (SUCCEEDED(hr) && value != nullptr) {
+        result = value;
     }
-    std::wstring result(value);
-    CoTaskMemFree(value);
+    CoTaskMemFree(value);  // sempre (no-op em nullptr): cobre falha com alocacao
     return result;
 }
 
@@ -103,21 +103,22 @@ void buildSessionInfo(const std::wstring& deviceId, const std::wstring& instance
     }
 
     LPWSTR displayName = nullptr;
-    if (SUCCEEDED(control->GetDisplayName(&displayName)) && displayName != nullptr)
+    const HRESULT hrName = control->GetDisplayName(&displayName);
+    std::wstring raw;
+    if (SUCCEEDED(hrName) && displayName != nullptr)
     {
-        const std::wstring raw(displayName);
-        CoTaskMemFree(displayName);
-        std::wstring source = raw;
-        if (!raw.empty() && raw.front() == L'@')
-        {
-            const std::wstring resolved = resolveIndirectString(raw);
-            source = resolved.empty() ? raw : resolved;
-        }
+        raw.assign(displayName);
+    }
+    CoTaskMemFree(displayName);  // sempre (no-op em nullptr): cobre falha com alocacao
+    if (!raw.empty() && raw.front() == L'@')
+    {
+        const std::wstring resolved = resolveIndirectString(raw);
+        const std::wstring source = resolved.empty() ? raw : resolved;
         out.displayName = util::normalizeDisplayName(source, out.processName);
     }
     else
     {
-        out.displayName = util::normalizeDisplayName(L"", out.processName);
+        out.displayName = util::normalizeDisplayName(raw, out.processName);
     }
 
     AudioSessionState state = AudioSessionStateInactive;
@@ -935,7 +936,8 @@ bool SessionWatcher::listActiveRender(std::vector<std::wstring>& out) const
             continue;
         }
         LPWSTR id = nullptr;
-        if (SUCCEEDED(device->GetId(&id)) && id != nullptr)
+        device->GetId(&id);
+        if (id != nullptr)
         {
             out.emplace_back(id);
             CoTaskMemFree(id);

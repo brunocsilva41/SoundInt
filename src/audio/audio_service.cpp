@@ -29,11 +29,13 @@ std::wstring readDeviceId(IMMDevice* device)
         return L"";
     }
     LPWSTR id = nullptr;
-    if (FAILED(device->GetId(&id)) || id == nullptr)
-    {
-        return L"";
+    const HRESULT hr = device->GetId(&id);
+    std::wstring result;
+    if (SUCCEEDED(hr) && id != nullptr) {
+        result = id;
     }
-    std::wstring result(id);
+    // Livre sempre: free(nullptr) e no-op e cobre o caso raro de a API
+    // devolver alocacao junto com falha.
     CoTaskMemFree(id);
     return result;
 }

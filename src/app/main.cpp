@@ -78,7 +78,12 @@ void cycleOutput()
         SI_LOG_WARN("hotkey", L"cycleOutput: falha ao trocar a saida default");
         return;
     }
-    audio.setDefaultDevice(next, soundint::Flow::Render, soundint::Role::Console);
+    if (!audio.setDefaultDevice(next, soundint::Flow::Render,
+                                 soundint::Role::Console)) {
+        SI_LOG_WARN("hotkey", L"cycleOutput: role Console nao trocou; "
+                              L"padrao de comunicacao pode estar divergente");
+        return;
+    }
     SI_LOG_INFO("hotkey", L"cycleOutput: saida default alterada");
 }
 
@@ -201,15 +206,21 @@ void wireUi(AppShell& shell, HWND window, soundint::core::Store& config)
     settingsHost.checkForUpdates =
         [](std::function<void(bool, const std::wstring&)> done) {
             const bool beta = soundint::store().settings().betaChannel;
+            // try/catch: excecao (bad_alloc de rede/JSON) sem handler numa
+            // thread = std::terminate no app inteiro.
             std::thread([done, beta]() {
-                soundint::update::CheckResult result =
-                    soundint::update::checkForUpdates(beta);
-                if (!result.error.empty()) {
-                    done(false, L"Erro: " + result.error);
-                } else if (result.updateAvailable) {
-                    done(true, L"v" + result.manifest.version);
-                } else {
-                    done(false, L"");
+                try {
+                    soundint::update::CheckResult result =
+                        soundint::update::checkForUpdates(beta);
+                    if (!result.error.empty()) {
+                        done(false, L"Erro: " + result.error);
+                    } else if (result.updateAvailable) {
+                        done(true, L"v" + result.manifest.version);
+                    } else {
+                        done(false, L"");
+                    }
+                } catch (...) {
+                    done(false, L"Erro: falha interna ao verificar atualizacoes");
                 }
             }).detach();
         };
@@ -440,14 +451,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 
     // 13) checagem automatica de atualizacoes (best-effort, em background).
     if (config.settings().autoCheckUpdates) {
-        std::thread([]() {
-            const bool beta = soundint::store().settings().betaChannel;
-            soundint::update::CheckResult result =
-                soundint::update::checkForUpdates(beta);
-            if (result.updateAvailable) {
-                SI_LOG_INFO("update", L"disponivel: v" + result.manifest.version);
-            } else if (!result.error.empty()) {
-                SI_LOG_WARN("update", result.error);
+        // Snapshot do beta NA THREAD MAIN: store().settings() escapa do lock
+        // por contrato, entao ler aqui evita data race com a UI.
+        const bool beta = config.settings().betaChannel;
+        std::thread([beta]() {
+            try {
+                soundint::update::CheckResult result =
+                    soundint::update::checkForUpdates(beta);
+                if (result.updateAvailable) {
+                    SI_LOG_INFO("update", L"disponivel: v" + result.manifest.version);
+                } else if (!result.error.empty()) {
+                    SI_LOG_WARN("update", result.error);
+                }
+            } catch (...) {
+                SI_LOG_WARN("update", L"checagem abortada por excecao");
             }
         }).detach();
     }
@@ -460,10 +477,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
         DispatchMessageW(&msg);
     }
 
-    g_shell = nullptr;
+    // WM_DESTROY (via DestroyWindow) precisa de g_shell valido para o
+    // cleanup de tray/atalhos/router: so zera depois.
     if (IsWindow(window)) {
         DestroyWindow(window);
     }
+    g_shell = nullptr;
     if (comInitialized) {
         CoUninitialize();
     }

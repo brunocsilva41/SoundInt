@@ -78,8 +78,11 @@ const wchar_t* userLocale()
 // ---------------------------------------------------------------------------
 Renderer& Renderer::instance()
 {
-    static RendererD2d renderer;
-    return renderer;
+    // Singleton "leaky": nunca destruido. A ordem de destruicao de estaticos
+    // entre TUs e indeterminada e janelas (tambem estaticas) podem referenciar
+    // o renderer durante o teardown do processo; o SO reclama os recursos no exit.
+    static RendererD2d* renderer = new RendererD2d;
+    return *renderer;
 }
 
 RendererD2d::~RendererD2d()

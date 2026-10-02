@@ -4,6 +4,11 @@
 
 namespace soundint {
 
+namespace {
+// Teto da fila de eventos pendentes (ver publish).
+constexpr size_t kMaxQueue = 1024;
+}  // namespace
+
 void EventBus::setWakeup(Wakeup wakeup)
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -31,6 +36,12 @@ void EventBus::publish(AppEvent ev)
     Wakeup wakeup;
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        // Teto da fila: um flood (dispositivos/sessoes) com a main atrasada
+        // nao pode crescer memoria sem bound. Descarta o mais antigo — os
+        // eventos de estado mais novos ja refletem o estado atual.
+        if (queue_.size() >= kMaxQueue) {
+            queue_.pop_front();
+        }
         queue_.push_back(std::move(ev));
         if (!wakePosted_) {
             wakePosted_ = true;

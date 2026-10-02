@@ -109,8 +109,22 @@ Manifest parseManifest(std::string_view json, std::wstring* error)
             return fail(L"manifest: size deve ser maior que zero");
         }
 
-        if (url.rfind(L"http://", 0) != 0 && url.rfind(L"https://", 0) != 0) {
-            return fail(L"manifest: url deve comecar com http:// ou https://");
+        if (url.rfind(L"https://", 0) != 0) {
+            return fail(L"manifest: url deve comecar com https://");
+        }
+
+        // Charset restrito: version entra no nome do arquivo baixado
+        // (sem separadores nao ha path traversal alem de pontos).
+        for (const wchar_t ch : version) {
+            const bool ok = (ch >= L'0' && ch <= L'9') || (ch >= L'a' && ch <= L'z') ||
+                            (ch >= L'A' && ch <= L'Z') || ch == L'.' || ch == L'-' ||
+                            ch == L'+';
+            if (!ok) {
+                return fail(L"manifest: version contem caractere invalido");
+            }
+        }
+        if (version.empty()) {
+            return fail(L"manifest: version vazio");
         }
 
         sha = toHexLowerAscii(sha);

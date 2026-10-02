@@ -212,6 +212,13 @@ void SettingsWindow::showCentered()
 
 void SettingsWindow::refreshAll()
 {
+    // capture_ guarda um ponteiro cru para controles que as paginas vao
+    // destruir em rebuildRows(); soltar antes evita UAF no proximo WM_MOUSE*
+    // (cenario: 2a instancia -> show -> refreshAll durante botao pressionado).
+    if (capture_ != nullptr) {
+        capture_ = nullptr;
+        releaseMouse();
+    }
     for (auto& pagePtr : pages_) {
         if (pagePtr) {
             pagePtr->refresh();
@@ -223,6 +230,10 @@ void SettingsWindow::selectPage(size_t index)
 {
     if (index >= kPageCount || index == selected_) {
         return;
+    }
+    if (capture_ != nullptr) {
+        capture_ = nullptr;
+        releaseMouse();
     }
     SettingsPage* oldPage = page();
     if (oldPage != nullptr) {
@@ -575,9 +586,11 @@ bool isVisible()
 void shutdown()
 {
     SettingsWindow& window = instance();
+    // Invalida antes de destruir: um resultado em voo carrega g_hwnd e faz
+    // PostMessageW; janela morta ignora, handle reciclado nao.
+    g_hwnd.store(nullptr);
     window.hide();
     window.destroy();
-    g_hwnd.store(nullptr);
     {
         std::lock_guard<std::mutex> lock(g_resultMutex);
         g_results.clear();

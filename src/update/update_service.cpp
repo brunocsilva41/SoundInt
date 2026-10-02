@@ -132,6 +132,7 @@ CheckResult checkForUpdates(bool betaChannel)
     soundint::Version local;
     if (!soundint::Version::parse(result.manifest.version, remote)) {
         result.error = L"versao remota invalida: " + result.manifest.version;
+        result.manifest = Manifest{};  // nao deixar valid=true com versao invalida
         return result;
     }
     const std::wstring current = installedVersion();
@@ -150,6 +151,14 @@ DownloadResult download(const Manifest& manifest, ProgressFn progress)
 
     if (!manifest.valid) {
         result.error = L"manifesto invalido";
+        return result;
+    }
+
+    // Revalida antes de montar caminho de arquivo (defesa em profundidade:
+    // version vem de JSON remoto e vira nome de arquivo em %TEMP%).
+    soundint::Version parsedVersion;
+    if (!soundint::Version::parse(manifest.version, parsedVersion)) {
+        result.error = L"versao do manifesto invalida: " + manifest.version;
         return result;
     }
 

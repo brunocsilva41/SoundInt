@@ -192,6 +192,10 @@ unsigned statusCode(HINTERNET request)
 // Le o corpo inteiro para uma string (UTF-8).
 bool readAll(HINTERNET request, std::string& body, std::wstring& error)
 {
+    // Teto para API/manifesto: 1 MiB. Sem ele, `available` vem do servidor
+    // e body.append pode estourar a memoria (bad_alloc na thread de update
+    // sem handler = std::terminate no app inteiro).
+    constexpr std::size_t kMaxBody = 1u << 20;
     for (;;) {
         DWORD available = 0;
         if (!WinHttpQueryDataAvailable(request, &available)) {
@@ -200,6 +204,10 @@ bool readAll(HINTERNET request, std::string& body, std::wstring& error)
         }
         if (available == 0) {
             return true;
+        }
+        if (body.size() + static_cast<std::size_t>(available) > kMaxBody) {
+            error = L"resposta HTTP maior que o limite de 1 MiB";
+            return false;
         }
         std::vector<char> buffer(available);
         DWORD read = 0;
@@ -281,6 +289,10 @@ bool downloadFile(const std::wstring& url, const std::wstring& destPath, const P
     }
 
     std::uint64_t done = 0;
+    // Teto do download e do aloc por leitura: servidor hostil nao enche
+    // disco nem RAM. (Instalador real ~2,4 MB; 512 MB e folga enorme.)
+    constexpr std::uint64_t kMaxDownload = 512ull << 20;
+    constexpr DWORD kMaxChunk = 1u << 20;
     for (;;) {
         DWORD available = 0;
         if (!WinHttpQueryDataAvailable(session.request.handle, &available)) {
@@ -289,6 +301,9 @@ bool downloadFile(const std::wstring& url, const std::wstring& destPath, const P
         }
         if (available == 0) {
             break;
+        }
+        if (available > kMaxChunk) {
+            available = kMaxChunk;
         }
 
         std::vector<char> buffer(available);
@@ -299,6 +314,10 @@ bool downloadFile(const std::wstring& url, const std::wstring& destPath, const P
         }
         if (read == 0) {
             break;
+        }
+
+        if (done + read > kMaxDownload) {
+            return fail(L"download excede o limite de 512 MB");
         }
 
         DWORD written = 0;

@@ -70,6 +70,11 @@ private:
 
     void checkNow()
     {
+        // Sem reentry: um segundo clique durante a checagem lancaria outra
+        // thread e os dois resultados briguariam pelo mesmo info_/state_.
+        if (state_ == State::Checking) {
+            return;
+        }
         if (!host().checkForUpdates) {
             state_ = State::NoService;
             info_.clear();
