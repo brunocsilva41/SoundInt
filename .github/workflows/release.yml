@@ -27,6 +27,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write        # attest-build-provenance (proveniencia dos assets)
+  attestations: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -417,6 +419,13 @@ jobs:
         with:
           name: release-package
           path: pkg
+
+      - name: Atestar proveniencia dos assets finais (SHA256)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            pkg/SoundInt-Setup-*.exe
+            pkg/SoundInt-*-portable.zip
 
       - name: Criar/atualizar release DRAFT
         shell: pwsh

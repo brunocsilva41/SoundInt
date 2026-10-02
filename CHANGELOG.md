@@ -4,7 +4,7 @@ Todas as mudancas notaveis do SoundInt sao documentadas neste arquivo.
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e versionado por [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
-## [0.1.0] - Não lançado
+## [0.1.0] - 2026-10-01
 
 ### Added
 

@@ -1,5 +1,7 @@
 # ============================================================================
 # NIGHTLY — build diario de desenvolvimento publicado como PRERELEASE.
+# Gatilho: cron diario 03:00 UTC + execucao manual (nao dispara em todo push,
+# para nao poluir o canal beta).
 # Etapas (com needs): 1 build -> 2 package -> 3 publish.
 #   build    : Release x64 + ctest; publica o binario como artefato.
 #   package  : zip portatil + update-manifest.json (version 0.1.0-nightly.N,
@@ -11,8 +13,8 @@
 name: Nightly
 
 on:
-  push:
-    branches: [main]
+  schedule:
+    - cron: "0 3 * * *"   # 03:00 UTC todo dia
   workflow_dispatch:
 
 permissions:

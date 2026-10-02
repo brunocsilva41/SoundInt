@@ -7,16 +7,21 @@ e como cortar/revogar uma release.
 
 | Workflow | Gatilho | Objetivo |
 | --- | --- | --- |
-| `.github/workflows/ci.yml` | push em `main` + PRs | Build Debug x64 + suítes de teste; sem segredos |
-| `.github/workflows/nightly.yml` | push em `main` | Build Release → zip portátil → **prerelease** `nightly-AAAAMMDD-HHMM` |
-| `.github/workflows/release.yml` | tag `v*` ou `workflow_dispatch` | Release estável validada → instalador → assinatura → draft → publicação |
+| `.github/workflows/ci.yml` | push em `main` + PRs | Build Debug x64 (1 job) + testes por parte em matriz paralela; sem segredos |
+| `.github/workflows/nightly.yml` | cron 03:00 UTC + `workflow_dispatch` | Build Release → zip portátil → **prerelease** `nightly-AAAAMMDD-HHMM` |
+| `.github/workflows/release.yml` | tag `v*` ou `workflow_dispatch` | Release estável validada → instalador → assinatura → attestation → draft → publicação |
 
-### CI (`ci.yml`)
+### CI (`ci.yml`) — build único + testes por parte
 
-1. `build-test` (windows-latest): `cmake -B build -A x64` →
-   `cmake --build build --config Debug` → executa `soundint_tests.exe` e as
-   suítes por track que existirem (`soundint_tests_core/audio/ui/update/app`)
-   → `ctest` → em falha, sobe artefatos de log.
+1. **`build`** (windows-latest): `cmake -B build -A x64` →
+   `cmake --build build --config Debug` → `ctest` → publica os `.exe` das
+   suítes como artefato `test-exes`; em falha, sobe artefatos de log.
+2. **`test`** (matriz `core/audio/ui/update/app/full`, `fail-fast: false`):
+   cada parte roda a própria suíte (`soundint_tests_<track>.exe`, ou o
+   `soundint_tests.exe` cheio no caso `full`) num job independente, baixando
+   o artefato do build. Uma parte vermelha não esconde as demais e
+   **Re-run failed jobs** refaz somente a parte que falhou — o build não
+   repete.
 
 ### Nightly (`nightly.yml`) — etapas com `needs:`
 
@@ -46,8 +51,9 @@ e como cortar/revogar uma release.
    `SoundInt.exe` e o instalador com `signtool` (SHA256 + carimbo de tempo) e
    **regenera** `SHA256SUMS.txt`/`update-manifest.json` (a assinatura muda os
    bytes).
-5. **`draft`** — cria (ou atualiza) a release como **rascunho** com todos os
-   assets via `gh`. Roda mesmo com `sign` pulado.
+5. **`draft`** — **attestation de proveniência** (`actions/attest-build-provenance`,
+   assinatura OIDC dos assets finais) e cria (ou atualiza) a release como
+   **rascunho** com todos os assets via `gh`. Roda mesmo com `sign` pulado.
 6. **`publish`** — `environment: production` (aprovador humano) e
    `gh release edit --draft=false`.
 

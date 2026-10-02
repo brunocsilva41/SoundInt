@@ -1,7 +1,12 @@
 # ============================================================================
-# CI — build + testes em push para main e em Pull Requests.
-# Etapa unica: checkout -> configure -> build Debug (x64) -> suites de teste
-# -> artefatos em falha. Nao depende de nenhum segredo.
+# CI — build unico + testes por PARTE em paralelo.
+#   build  : checkout -> cmake x64 -> build Debug -> ctest (unit/app_policy)
+#            -> publica os .exe das suites como artefato.
+#   test   : matriz (core/audio/ui/update/app/full) roda cada suite em um job
+#            proprio, baixando o artefato do build. fail-fast: false => uma
+#            parte vermelha nao esconde as demais; "Re-run failed jobs"
+#            refaz somente a parte que falhou (o build nao repete).
+# Sem segredos: permissions contents:read.
 # ============================================================================
 name: CI
 
@@ -10,6 +15,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -20,10 +26,10 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Etapa 1/1 — build-test: compila Debug x64 e roda as suites de teste.
+  # Etapa 1 — build: compila Debug x64 uma vez e roda o ctest registrado.
   # ---------------------------------------------------------------------------
-  build-test:
-    name: "build-test (Windows x64 Debug)"
+  build:
+    name: "1 - build (Windows x64 Debug)"
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -35,44 +41,72 @@ jobs:
       - name: Compilar (Debug)
         run: cmake --build build --config Debug --parallel
 
-      - name: Testes (suite principal + suites por track)
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $suites = @(
-            'soundint_tests',
-            'soundint_tests_core',
-            'soundint_tests_audio',
-            'soundint_tests_ui',
-            'soundint_tests_update',
-            'soundint_tests_app'
-          )
-          $found = 0
-          foreach ($s in $suites) {
-            $exe = Join-Path 'build\Debug' "$s.exe"
-            if (Test-Path $exe) {
-              Write-Host "::group::Executando $s.exe"
-              & $exe
-              $code = $LASTEXITCODE
-              Write-Host "::endgroup::"
-              if ($code -ne 0) { throw "Suite $s.exe falhou (exit code $code)" }
-              $found++
-            } else {
-              Write-Host "Suite $s.exe nao encontrada (ignorando)."
-            }
-          }
-          if ($found -eq 0) { throw 'Nenhuma suite de testes encontrada em build\Debug.' }
-          Write-Host "$found suite(s) executada(s) com sucesso."
-          # Testes registrados no CMake (unit, app_policy).
-          ctest --test-dir build -C Debug --output-on-failure
+      - name: Testes registrados no CMake (ctest)
+        run: ctest --test-dir build -C Debug --output-on-failure
 
-      - name: Upload de artefatos em falha
+      - name: Publicar binarios das suites
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-exes
+          path: build/Debug/soundint_tests*.exe
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Artefatos de diagnostico em falha
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ci-failure-${{ github.run_id }}
+          name: ci-build-failure-${{ github.run_id }}
           path: |
             build/Testing/**
             build/**/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Etapa 2 — test: uma job por parte, em paralelo. Cada suite e independente:
+  # falhou uma => so ela aparece vermelha e o re-run refaz so ela.
+  # ---------------------------------------------------------------------------
+  test:
+    name: "2 - test (${{ matrix.suite }})"
+    needs: build
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [core, audio, ui, update, app, full]
+    steps:
+      - name: Baixar binarios das suites
+        uses: actions/download-artifact@v4
+        with:
+          name: test-exes
+          path: bin
+
+      - name: Executar suite ${{ matrix.suite }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $suite = '${{ matrix.suite }}'
+          $exe = if ($suite -eq 'full') {
+            'bin\soundint_tests.exe'
+          } else {
+            "bin\soundint_tests_$suite.exe"
+          }
+          if (-not (Test-Path $exe)) { throw "Suite nao encontrada: $exe" }
+          Write-Host "::group::Executando $exe"
+          & $exe
+          $code = $LASTEXITCODE
+          Write-Host "::endgroup::"
+          if ($code -ne 0) { throw "Suite $suite falhou (exit code $code)" }
+          Write-Host "Suite $suite OK."
+
+      - name: Logs em falha
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-test-${{ matrix.suite }}-failure-${{ github.run_id }}
+          path: |
+            **/*.log
+            C:\Users\runneradmin\AppData\Local\SoundInt\logs\**
           if-no-files-found: ignore
           retention-days: 7
