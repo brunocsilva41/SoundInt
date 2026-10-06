@@ -175,6 +175,49 @@ TEST_CASE("planLayout mantem um minimo de altura em work areas minusculas")
     CHECK(plan.maxScroll >= 0.f);
 }
 
+TEST_CASE("planLayout com escala: todas as metricas em px fisicos")
+{
+    ContentSpec spec;
+    spec.outputRows = 1;
+
+    const LayoutPlan one = planLayout(spec, 800.f, 1.f);
+    const LayoutPlan two = planLayout(spec, 800.f, 2.f);
+
+    CHECK(two.contentHeight == doctest::Approx(one.contentHeight * 2.f));
+    CHECK(two.panelTop == doctest::Approx(one.panelTop * 2.f));
+    CHECK(two.viewport == doctest::Approx(one.viewport * 2.f));
+    CHECK(two.windowHeight == doctest::Approx(one.windowHeight * 2.f));
+    CHECK(two.maxScroll == doctest::Approx(0.f));
+}
+
+TEST_CASE("planLayout com escala: teto de 70% da work area fisica")
+{
+    ContentSpec spec;
+    spec.outputRows = 3;
+    spec.appRows = 6;
+    spec.systemRow = true;
+
+    const LayoutPlan plan = planLayout(spec, 700.f, 1.5f);
+
+    // Conteudo fisico excede o teto -> janela colada em 70% da work area.
+    CHECK(plan.contentHeight > plan.viewport);
+    CHECK(plan.windowHeight == doctest::Approx(700.f * layout::kMaxWorkRatio));
+    CHECK(plan.panelTop == doctest::Approx(56.f * 1.5f));
+    CHECK(plan.viewport ==
+          doctest::Approx(plan.windowHeight - plan.panelTop - 12.f * 1.5f));
+    CHECK(plan.maxScroll == doctest::Approx(plan.contentHeight - plan.viewport));
+}
+
+TEST_CASE("planLayout com escala: altura minima tambem escala")
+{
+    ContentSpec spec;
+    spec.outputRows = 0;
+    const LayoutPlan plan = planLayout(spec, 40.f, 2.f);
+    CHECK(plan.windowHeight >= doctest::Approx(layout::kMinWindowH * 2.f));
+    CHECK(plan.viewport >= 0.f);
+    CHECK(plan.maxScroll >= 0.f);
+}
+
 TEST_CASE("planLayout soma a altura extra do dropdown aberto")
 {
     ContentSpec closed;

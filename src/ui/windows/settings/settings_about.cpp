@@ -1,6 +1,6 @@
 // ============================================================================
-// Pagina Sobre (Track K): versao, licenca, repositorio, issues, logs e
-// creditos. Aberturas via ShellExecuteW (shell32).
+// Pagina Sobre (U3): frase de produto, versao, licenca, repositorio, issues,
+// logs e creditos. Aberturas via ShellExecuteW (shell32).
 // ============================================================================
 #include "ui/windows/settings/settings_page.h"
 
@@ -65,6 +65,7 @@ public:
 protected:
     void retranslateImpl() override
     {
+        tagline_ = tr(L"settings.about.tagline");
         version_ = tr(L"settings.about.version");
         licenseButton_.setText(tr(L"settings.about.license"));
         repoButton_.setText(tr(L"settings.about.repo"));
@@ -79,43 +80,8 @@ protected:
         // Sem estado persistido: nada a ler do Store.
     }
 
-    void layoutImpl(const Rect& area, float scale) override
-    {
-        (void)scale;
-        const float y0 = area.y - scrollY_;
-        const float buttonH = s(tokens::kControlHeight);
-        const float gap = s(8.f);
-        const float buttonW = (area.w - gap) * 0.5f;
-
-        float y = y0;
-        versionRect_ = {area.x, y, area.w, s(20.f)};
-        y += s(20.f) + s(12.f);
-
-        licenseButton_.setBounds({area.x, y, buttonW, buttonH});
-        repoButton_.setBounds({area.x + buttonW + gap, y, buttonW, buttonH});
-        y += buttonH + gap;
-
-        issueButton_.setBounds({area.x, y, buttonW, buttonH});
-        logsButton_.setBounds({area.x + buttonW + gap, y, buttonW, buttonH});
-        y += buttonH + s(20.f);
-
-        creditsTitleRect_ = {area.x, y, area.w, s(20.f)};
-        y += s(20.f) + s(4.f);
-        creditsTextRect_ = {area.x, y, area.w, s(20.f)};
-        y += s(20.f);
-
-        contentH_ = y - y0;
-    }
-
-    void renderImpl(IRenderTarget& rt, const tokens::Palette& palette) override
-    {
-        drawText(rt, versionRect_, version_, palette, tokens::kFontBody,
-                 tokens::kWeightRegular, palette.textSecondary);
-        drawText(rt, creditsTitleRect_, creditsTitle_, palette, tokens::kFontBody,
-                 tokens::kWeightSemibold, palette.textPrimary);
-        drawText(rt, creditsTextRect_, creditsText_, palette, tokens::kFontBody,
-                 tokens::kWeightRegular, palette.textSecondary);
-    }
+    void layoutImpl(const Rect& area, float scale) override;
+    void renderImpl(IRenderTarget& rt, const tokens::Palette& palette) override;
 
 private:
     controls::Button licenseButton_;
@@ -123,14 +89,60 @@ private:
     controls::Button issueButton_;
     controls::Button logsButton_;
 
+    std::wstring tagline_;
     std::wstring version_;
     std::wstring creditsTitle_;
     std::wstring creditsText_;
 
+    Rect taglineRect_{};
     Rect versionRect_{};
     Rect creditsTitleRect_{};
     Rect creditsTextRect_{};
 };
+
+void AboutPage::layoutImpl(const Rect& area, float /*scale*/)
+{
+    const float y0 = area.y - scrollY_;
+    const float buttonH = s(tokens::kControlHeight);
+    const float gap = s(8.f);
+    const float buttonW = (area.w - gap) * 0.5f;
+
+    float y = y0;
+    versionRect_ = {area.x, y, area.w, s(20.f)};
+    y += s(20.f) + s(4.f);
+
+    // Frase de produto: o que o app faz, em uma linha (antes a pagina comecava
+    // direto na versao + botoes).
+    taglineRect_ = {area.x, y, area.w, s(20.f)};
+    y += s(20.f) + s(12.f);
+
+    licenseButton_.setBounds({area.x, y, buttonW, buttonH});
+    repoButton_.setBounds({area.x + buttonW + gap, y, buttonW, buttonH});
+    y += buttonH + gap;
+
+    issueButton_.setBounds({area.x, y, buttonW, buttonH});
+    logsButton_.setBounds({area.x + buttonW + gap, y, buttonW, buttonH});
+    y += buttonH + s(20.f);
+
+    creditsTitleRect_ = {area.x, y, area.w, s(20.f)};
+    y += s(20.f) + s(4.f);
+    creditsTextRect_ = {area.x, y, area.w, s(20.f)};
+    y += s(20.f);
+
+    contentH_ = y - y0;
+}
+
+void AboutPage::renderImpl(IRenderTarget& rt, const tokens::Palette& palette)
+{
+    drawText(rt, versionRect_, version_, palette, tokens::kFontBody,
+             tokens::kWeightRegular, palette.textSecondary);
+    drawText(rt, taglineRect_, tagline_, palette, tokens::kFontBody,
+             tokens::kWeightRegular, palette.textPrimary);
+    drawText(rt, creditsTitleRect_, creditsTitle_, palette, tokens::kFontBody,
+             tokens::kWeightSemibold, palette.textPrimary);
+    drawText(rt, creditsTextRect_, creditsText_, palette, tokens::kFontBody,
+             tokens::kWeightRegular, palette.textSecondary);
+}
 
 }  // namespace
 

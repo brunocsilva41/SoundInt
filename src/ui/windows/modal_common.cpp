@@ -168,7 +168,8 @@ std::wstring deviceGlyphFor(const std::wstring& friendlyName)
 // ---------------------------------------------------------------------------
 Rect CheckBox::boxRect() const
 {
-    return {bounds_.x, bounds_.y + (bounds_.h - kBoxSize) * 0.5f, kBoxSize, kBoxSize};
+    const float box = kBoxSize * scale();
+    return {bounds_.x, bounds_.y + (bounds_.h - box) * 0.5f, box, box};
 }
 
 void CheckBox::render(IRenderTarget& rt, const tokens::Palette& palette)
@@ -177,17 +178,22 @@ void CheckBox::render(IRenderTarget& rt, const tokens::Palette& palette)
         return;
     }
 
-    renderOverlay(rt, palette);
+    const float radius = tokens::kRadiusSm * scale();
+    const float strokeW = (scale() >= 2.f) ? 2.f : 1.f;
 
+    // Ordem = Button do Track E: fundo -> borda -> overlay -> conteudo.
+    // (overlay por cima do fundo/borda e por baixo do glifo/texto; antes o
+    // hover era pintado ANTES da caixa e ficava invisivel).
     const Rect box = boxRect();
-    rt.fillRoundedRect(box, tokens::kRadiusSm, value_ ? palette.accent : palette.surface);
-    rt.strokeRoundedRect(box, tokens::kRadiusSm, 1.f,
+    rt.fillRoundedRect(box, radius, value_ ? palette.accent : palette.surface);
+    rt.strokeRoundedRect(box, radius, strokeW,
                          value_ ? palette.accent : palette.border);
+    renderOverlay(rt, palette);
 
     if (value_) {
         TextStyle glyph;
         glyph.fontFamily = tokens::kFontIcons;
-        glyph.fontSize = tokens::kFontCaption;
+        glyph.fontSize = tokens::kFontCaption * scale();
         glyph.weight = tokens::kWeightRegular;
         glyph.color = palette.accentFg;
         glyph.align = TextStyle::Align::Center;
@@ -197,12 +203,12 @@ void CheckBox::render(IRenderTarget& rt, const tokens::Palette& palette)
 
     TextStyle text;
     text.fontFamily = tokens::kFontUi;
-    text.fontSize = tokens::kFontBody;
+    text.fontSize = tokens::kFontBody * scale();
     text.weight = tokens::kWeightRegular;
     text.color = enabled_ ? palette.textPrimary : palette.textSecondary;
     text.align = TextStyle::Align::Left;
     text.valign = TextStyle::VAlign::Middle;
-    const float textX = box.x + kBoxSize + tokens::kSpace2;
+    const float textX = box.x + box.w + tokens::kSpace2 * scale();
     const Rect textBox{textX, bounds_.y,
                        (std::max)(0.f, bounds_.x + bounds_.w - textX), bounds_.h};
     rt.drawText(text_, textBox, text);
@@ -294,13 +300,13 @@ void AccentButton::render(IRenderTarget& rt, const tokens::Palette& palette)
         return;
     }
 
-    rt.fillRoundedRect(bounds_, tokens::kRadiusMd,
-                       enabled_ ? palette.accent : palette.surfaceAlt);
+    const float radius = tokens::kRadiusMd * scale();
+    rt.fillRoundedRect(bounds_, radius, enabled_ ? palette.accent : palette.surfaceAlt);
     renderOverlay(rt, palette);
 
     TextStyle ts;
     ts.fontFamily = tokens::kFontUi;
-    ts.fontSize = tokens::kFontBody;
+    ts.fontSize = tokens::kFontBody * scale();
     ts.weight = tokens::kWeightRegular;
     ts.color = enabled_ ? palette.accentFg : palette.textSecondary;
     ts.align = TextStyle::Align::Center;
@@ -433,6 +439,11 @@ void ModalWindow::reframe()
     }
 
     const float scale = dpiScale();
+    // DPI: controles (fontes/metricas internas do Track E) leem scale().
+    for (controls::InteractiveControl* control : controls_) {
+        control->setScale(scale);
+    }
+
     const Size logical = logicalContentSize();
     const Size pixels{logical.w * scale, logical.h * scale};
     const Rect rect = computePopupRect(anchor_, pixels, workArea);
@@ -467,6 +478,8 @@ void ModalWindow::setFocus(controls::InteractiveControl* control)
         item->setFocused(item == control);
     }
     focused_ = control;
+    // Focus ring visivel: sem isto o Tab movia o foco sem repintar.
+    invalidate();
 }
 
 void ModalWindow::cycleFocus(int direction)
@@ -624,10 +637,11 @@ bool ModalWindow::onKey(const KeyEvent& e)
 
 void ModalWindow::onRender(IRenderTarget& rt, const Rect& client)
 {
-    (void)client;
     const tokens::Palette pal = palette();
     const float scale = dpiScale();
-    layoutControls(scale);
+    // Fonte unica de verdade do tamanho: o cliente REAL da janela (pos-clip
+    // do monitor) — os modais nao recalculam kWidth*scale por conta propria.
+    layoutControls(scale, {client.w, client.h});
     rt.clear(pal.windowBg);
     paint(rt, scale, pal);
     for (controls::InteractiveControl* control : controls_) {
@@ -635,6 +649,25 @@ void ModalWindow::onRender(IRenderTarget& rt, const Rect& client)
             control->render(rt, pal);
         }
     }
+}
+
+CursorShape ModalWindow::onQueryCursor(float x, float y)
+{
+    return hitTest(x, y) ? CursorShape::Hand : CursorShape::Arrow;
+}
+
+bool ModalWindow::handleMessage(UINT msg, WPARAM w, LPARAM l, LRESULT& result)
+{
+    (void)w;
+    (void)l;
+    if (msg == WM_DPICHANGED) {
+        // Monitor novo = DPI novo: recalcula tamanho/posicao com o scale
+        // atualizado (a base so aplicaria o retangulo sugerido).
+        reframe();
+        result = 0;
+        return true;
+    }
+    return false;
 }
 
 void ModalWindow::onDestroy()
@@ -766,7 +799,10 @@ void requestNewDevice(const DeviceInfo& device)
         return;   // antes do boot: no-op
     }
     m.queue.push(PendingModal::forDevice(device));
-    showNext();
+    // Sempre via timer de 1ms: nunca apresenta um modal dentro do
+    // WM_DESTROY do anterior (foco/foreground instaveis) e mantem a fila
+    // andando mesmo quando o fechamento chega via DestroyWindow.
+    scheduleShowNext();
 }
 
 void requestNewApp(const SessionInfo& session)
@@ -776,7 +812,7 @@ void requestNewApp(const SessionInfo& session)
         return;   // antes do boot: no-op
     }
     m.queue.push(PendingModal::forApp(session));
-    showNext();
+    scheduleShowNext();
 }
 
 void shutdown()

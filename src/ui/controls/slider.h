@@ -2,7 +2,8 @@
 // Slider horizontal: valor normalizado 0..1 com clamp.
 // Pointer: Down captura -> Move atualiza; wheel +-0.05 por notch; setas
 // +-0.01 (Shift +-0.1). Trilho + pino em palette.accent.
-// A logica pura valueFromX()/xFromValue() e estatica (testavel sem desenho).
+// A logica pura valueFromX()/xFromValue() e estatica (testavel sem desenho);
+// thumbD = diametro do pino (default 16px) — a instancia passa 16*scale().
 // ============================================================================
 #pragma once
 
@@ -17,8 +18,10 @@ public:
     using ChangedFn = std::function<void(float)>;
 
     // Logica pura (exposta para teste): mapeia x <-> valor com clamp 0..1.
-    static float valueFromX(float x, const Rect& bounds);
-    static float xFromValue(float value, const Rect& bounds);
+    static float valueFromX(float x, const Rect& bounds,
+                            float thumbD = tokens::kControlHeight * 0.5f);
+    static float xFromValue(float value, const Rect& bounds,
+                            float thumbD = tokens::kControlHeight * 0.5f);
 
     // Set programatico: nao dispara onChanged (evita loops com a janela).
     void setValue(float value);

@@ -7,6 +7,7 @@
 #include "ui/controls/controls.h"
 #include "ui/renderer.h"
 #include "ui/windows/settings/settings_window.h"
+#include "ui/windows/window_base.h"   // CursorShape (WM_SETCURSOR)
 
 #include <memory>
 #include <string>
@@ -39,7 +40,9 @@ public:
     const std::wstring& text() const { return text_; }
     void setPlaceholder(std::wstring placeholder) { placeholder_ = std::move(placeholder); }
     void setEditable(bool editable) { editable_ = editable; }
-    void setScale(float scale) { scale_ = scale; }
+    bool editable() const { return editable_; }
+    // Escala (DPI) vem de Control::setScale(), propagada a todos os controls_
+    // por SettingsPage::layout() — o campo nao guarda fator proprio.
     void append(wchar_t c);
     void eraseBack();
 
@@ -52,7 +55,6 @@ public:
 private:
     std::wstring text_;
     std::wstring placeholder_;
-    float scale_ = 1.f;
     bool editable_ = true;
 };
 
@@ -84,11 +86,23 @@ public:
     bool rawKey(UINT msg, WPARAM w);
     // Cola texto no campo focado (Ctrl+V); true se havia campo editavel.
     bool paste(const std::wstring& text);
-    // Chamado quando a janela sai da pagina (ex.: cancela gravacao).
-    virtual void onHide() {}
+    // Cursor sob o ponto (WM_SETCURSOR da janela): Hand sobre interativos,
+    // Text sobre campos editaveis, Arrow no resto. Espelha pointer().
+    CursorShape cursorAt(float x, float y) const;
+    // Tab/Shift+Tab: move o foco de teclado pelos controls_ na ordem de
+    // layout (pulando invisiveis/desabilitados), desfocando o anterior.
+    // false = a pagina nao tem candidatos a foco.
+    bool cycleFocus(bool backward);
+    // Chamado quando a janela sai da pagina (ex.: cancela gravacao): a base
+    // fecha popups abertos e solta o foco. Sobrescritas devem chamar a base.
+    virtual void onHide();
 
     // Resultado do checkForUpdates (somente pagina Atualizacoes).
     virtual void updateResult(bool /*found*/, const std::wstring& /*info*/) {}
+
+    // Resultado do re-registro de atalhos apos edicao (integrador chama
+    // notifyHotkeysResult; false = conflito). Somente Atalhos consome.
+    virtual void hotkeysResult(bool /*ok*/) {}
 
 protected:
     // Implementacao por pagina ------------------------------------------------
@@ -121,6 +135,21 @@ protected:
     float contentH_ = 0.f;         // preenchido por layoutImpl
     std::vector<Control*> controls_;
     std::vector<TextField*> fields_;
+
+private:
+    // Infra compartilhada das paginas (nao usar direto nas paginas).
+    void applyScale();   // propaga setScale(scale_) a todos os controls_
+    controls::Dropdown* expandedDropdown() const;   // popup aberto (o do topo)
+    // Uniao bounds + popup: cobre paginas que expandem os bounds ao abrir e
+    // paginas que deixam o bounds so do campo.
+    Rect dropdownRegion(const controls::Dropdown& dropdown) const;
+    void renderScrollbar(IRenderTarget& rt, const tokens::Palette& palette) const;
+    // Define o foco de teclado (unico por pagina); desfoca os demais.
+    void focusControl(controls::InteractiveControl* target);
+    // Valida focused_ contra controls_ (rebuilds podem destruir controles).
+    controls::InteractiveControl* focusedControl();
+
+    controls::InteractiveControl* focused_ = nullptr;
 };
 
 // Fabricas (uma por arquivo de pagina).

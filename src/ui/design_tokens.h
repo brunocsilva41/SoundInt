@@ -76,6 +76,7 @@ struct Palette {
     Color accent;
     Color accentFg;
     Color danger;
+    Color dangerFg;   // texto/icone sobre fundo danger
     Color success;
     Color hover;
     Color pressed;
@@ -94,6 +95,7 @@ inline Palette lightPalette()
     p.accent = Color::rgb(0, 103, 192);
     p.accentFg = Color::rgb(255, 255, 255);
     p.danger = Color::rgb(196, 43, 28);
+    p.dangerFg = Color::rgb(255, 255, 255);
     p.success = Color::rgb(16, 124, 16);
     p.hover = Color::rgb(0, 0, 0, 26);    // 10% preto
     p.pressed = Color::rgb(0, 0, 0, 51);  // 20% preto
@@ -113,6 +115,7 @@ inline Palette darkPalette()
     p.accent = Color::rgb(76, 160, 255);
     p.accentFg = Color::rgb(16, 16, 16);
     p.danger = Color::rgb(255, 99, 71);
+    p.dangerFg = Color::rgb(32, 8, 4);
     p.success = Color::rgb(126, 231, 126);
     p.hover = Color::rgb(255, 255, 255, 26);
     p.pressed = Color::rgb(255, 255, 255, 51);

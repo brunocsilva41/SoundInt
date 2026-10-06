@@ -226,8 +226,12 @@ void wireUi(AppShell& shell, HWND window, soundint::core::Store& config)
         };
     settingsHost.hotkeysChanged = [&shell, window]() {
         shell.hotkeys.unregister();
-        shell.hotkeys.registerHotkeys(window,
-                                       soundint::store().settings().hotkeys);
+        const bool ok = shell.hotkeys.registerHotkeys(
+            window, soundint::store().settings().hotkeys);
+        if (!ok) {
+            // Conflito de atalho global: avisa na pagina Atalhos (UI thread).
+            soundint::ui::settings::notifyHotkeysResult(false);
+        }
     };
     settingsHost.applyProfile = [&shell](const std::wstring& name) {
         for (const soundint::Profile& profile : soundint::store().profiles()) {

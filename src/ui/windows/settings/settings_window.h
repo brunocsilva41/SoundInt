@@ -33,6 +33,11 @@ void hide();
 bool isVisible();
 void shutdown();
 
+// Resultado do re-registro de atalhos apos edicao. O integrador chama apos
+// hotkeysChanged devolver, na thread da UI, com o bool de registerHotkeys;
+// false = conflito (aviso na pagina Atalhos). Janela fechada = no-op.
+void notifyHotkeysResult(bool ok);
+
 // HKCU\Software\Microsoft\Windows\CurrentVersion\Run "SoundInt" = caminho do
 // exe. Usado pela pagina Geral e pelo boot (Wave 3 chama applyStartup no start
 // se settings.startWithWindows). Nao toca no registro: apenas grava/remove.

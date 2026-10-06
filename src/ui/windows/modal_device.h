@@ -18,7 +18,7 @@ public:
 
 protected:
     Size logicalContentSize() const override;
-    void layoutControls(float scale) override;
+    void layoutControls(float scale, const Size& client) override;
     void paint(IRenderTarget& rt, float scale, const tokens::Palette& pal) override;
     void onPrimaryAction() override;
     void onCancelAction() override;

@@ -43,7 +43,8 @@ bool Tray::init(HWND hwnd)
     if (!nid.hIcon) {
         nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     }
-    lstrcpynW(nid.szTip, L"SoundInt", static_cast<int>(ARRAYSIZE(nid.szTip)));
+    lstrcpynW(nid.szTip, L"SoundInt — roteamento de áudio por app",
+              static_cast<int>(ARRAYSIZE(nid.szTip)));
 
     if (!Shell_NotifyIconW(NIM_ADD, &nid)) {
         SI_LOG_ERROR(kChannel, L"falha ao adicionar o icone da bandeja");

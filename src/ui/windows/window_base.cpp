@@ -362,6 +362,33 @@ LRESULT WindowBase::handle(UINT msg, WPARAM w, LPARAM l)
                 return 0;
             }
             break;
+        case WM_SETCURSOR: {
+            // LOWORD(l) = codigo de hit-test; so mudamos o cursor dentro do
+            // cliente (borda/defWM mantem o cursor da classe).
+            if (LOWORD(l) != HTCLIENT) {
+                break;
+            }
+            POINT pt{};
+            if (!GetCursorPos(&pt) || !ScreenToClient(hwnd_, &pt)) {
+                break;
+            }
+            const CursorShape shape = onQueryCursor(static_cast<float>(pt.x),
+                                                   static_cast<float>(pt.y));
+            const wchar_t* resource = IDC_ARROW;
+            switch (shape) {
+                case CursorShape::Hand:
+                    resource = IDC_HAND;
+                    break;
+                case CursorShape::Text:
+                    resource = IDC_IBEAM;
+                    break;
+                case CursorShape::Arrow:
+                default:
+                    break;
+            }
+            SetCursor(LoadCursorW(nullptr, resource));
+            return TRUE;
+        }
         case WM_MOUSEMOVE: {
             TRACKMOUSEEVENT tme{};
             tme.cbSize = sizeof(tme);

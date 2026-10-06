@@ -20,6 +20,11 @@ void ListPanel::clear()
 // ---------------------------------------------------------------------------
 // Medidas
 // ---------------------------------------------------------------------------
+float ListPanel::effectiveGap() const
+{
+    return gap_ * scale_;
+}
+
 float ListPanel::childHeight(Control& child) const
 {
     const float h = child.measure(bounds_.w).h;
@@ -35,7 +40,7 @@ float ListPanel::contentHeight() const
             continue;
         }
         if (!first) {
-            height += gap_;
+            height += effectiveGap();
         }
         height += childHeight(*child);
         first = false;
@@ -78,7 +83,7 @@ void ListPanel::layout()
             continue;
         }
         if (!first) {
-            y += gap_;
+            y += effectiveGap();
         }
         first = false;
         const float h = childHeight(*child);
@@ -125,7 +130,8 @@ bool ListPanel::onPointer(const PointerEvent& e)
     }
 
     if (e.kind == PointerKind::Wheel && enabled_ && bounds_.contains(e.x, e.y)) {
-        setScrollY(scrollY_ - e.wheelDelta * kScrollStep);
+        // Passo de scroll proporcional ao DPI (notch = kRowHeight * scale_).
+        setScrollY(scrollY_ - e.wheelDelta * kScrollStep * scale_);
         return true;
     }
     return false;

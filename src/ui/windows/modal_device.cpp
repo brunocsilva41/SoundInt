@@ -11,14 +11,14 @@
 namespace soundint::ui::modal {
 namespace {
 
-// Layout em px logicos (x dpiScale() na janela).
+// Layout em px logicos (x dpiScale() na janela). Tudo no grid de 4px.
 constexpr float kWidth = 360.f;
 constexpr float kPad = tokens::kWindowMargin;          // 16
 constexpr float kIconSize = 32.f;
 constexpr float kHeaderHeight = 40.f;                  // linha do icone/titulo
 constexpr float kTitleHeight = 20.f;
-constexpr float kNameHeight = 18.f;
-constexpr float kNameOffsetY = 22.f;                   // sob o titulo
+constexpr float kNameHeight = 20.f;
+constexpr float kNameOffsetY = 24.f;                   // sob o titulo (grid 4)
 constexpr float kRowGap = tokens::kSpace3;             // 12
 constexpr float kCheckHeight = 24.f;
 constexpr float kSecondaryWidth = 104.f;
@@ -56,9 +56,11 @@ Size ModalDeviceWindow::logicalContentSize() const
     return {kWidth, kHeight};
 }
 
-void ModalDeviceWindow::layoutControls(float scale)
+void ModalDeviceWindow::layoutControls(float scale, const Size& client)
 {
-    const float width = kWidth * scale;
+    // Fonte unica de verdade: cliente REAL da janela (o clamp da area de
+    // trabalho pode reduzi-lo abaixo de kWidth*scale).
+    const float width = client.w;
     const float pad = kPad * scale;
 
     iconRect_ = {pad, pad, kIconSize * scale, kIconSize * scale};
@@ -70,13 +72,21 @@ void ModalDeviceWindow::layoutControls(float scale)
     const float checkY = (kPad + kHeaderHeight + kRowGap) * scale;
     remember_.setBounds({pad, checkY, width - pad * 2.f, kCheckHeight * scale});
 
+    // Botoes ancorados a direita; largura reduz proporcionalmente quando o
+    // cliente foi clamped (tela pequena), sem sair da janela.
     const float buttonY = checkY + (kCheckHeight + kRowGap) * scale;
-    const float primaryX = width - pad - kPrimaryWidth * scale;
-    const float secondaryX = primaryX - tokens::kSpace2 * scale - kSecondaryWidth * scale;
+    const float availW = (std::max)(0.f, width - pad * 2.f);
+    const float gap = tokens::kSpace2 * scale;
+    const float secondaryW =
+        (std::min)(kSecondaryWidth * scale, availW * 0.4f);
+    const float primaryW =
+        (std::min)(kPrimaryWidth * scale, (std::max)(0.f, availW - secondaryW - gap));
+    const float primaryX = width - pad - primaryW;
+    const float secondaryX = primaryX - gap - secondaryW;
     primary_.setBounds(
-        {primaryX, buttonY, kPrimaryWidth * scale, tokens::kControlHeight * scale});
+        {primaryX, buttonY, primaryW, tokens::kControlHeight * scale});
     secondary_.setBounds(
-        {secondaryX, buttonY, kSecondaryWidth * scale, tokens::kControlHeight * scale});
+        {secondaryX, buttonY, secondaryW, tokens::kControlHeight * scale});
 }
 
 void ModalDeviceWindow::paint(IRenderTarget& rt, float scale,

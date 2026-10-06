@@ -3,6 +3,16 @@
 // Substitui o stub da Wave 0; a API e contrato (ui/i18n.h) nao muda.
 // Chaves desconhecidas devolvem a propria chave; idioma "auto" resolve pelo
 // locale do sistema (GetUserDefaultUILanguage).
+//
+// Regras do U3 (redesign UI/UX):
+//  - NUNCA renomear chave existente (contrato compartilhado); valores podem
+//    ser ajustados e chaves novas criadas livremente.
+//  - Vocabulario unico: "Regra" = roteamento por app (pagina Regras);
+//    "Rota" = roteamento dentro de um perfil. "override" nunca aparece na UI.
+//  - Chaves removidas (ficaram orfas apos o redesign, sem consumidores):
+//    settings.updates.current (versao duplicada com Sobre) e
+//    settings.profiles.overrideDevicePlaceholder (campo de deviceId cru
+//    substituido por Dropdown de saidas).
 // ============================================================================
 #include "ui/i18n.h"
 
@@ -86,6 +96,7 @@ const Table& ptTable()
         {L"common.apply", L"Aplicar"},
         {L"common.cancel", L"Cancelar"},
         {L"common.close", L"Fechar"},
+        {L"common.undo", L"Desfazer"},
 
         {L"modal.newDevice.title", L"Novo dispositivo de \u00e1udio"},
         {L"modal.newDevice.primary", L"Tornar sa\u00edda padr\u00e3o"},
@@ -106,6 +117,8 @@ const Table& ptTable()
         {L"mixer.defaultOutputLabel", L"Padr\u00e3o do sistema"},
         {L"mixer.volume", L"Volume"},
         {L"mixer.mute", L"Silenciar"},
+        {L"mixer.emptyHint", L"Abra um app e ele aparecer\u00e1 aqui."},
+        {L"mixer.route", L"Roteamento"},
 
         // --- janela de settings ---------------------------------------------
         {L"settings.title", L"Configura\u00e7\u00f5es"},
@@ -115,9 +128,18 @@ const Table& ptTable()
         {L"settings.nav.hotkeys", L"Atalhos"},
         {L"settings.nav.updates", L"Atualiza\u00e7\u00f5es"},
         {L"settings.nav.about", L"Sobre"},
+        {L"settings.nav.section.behavior", L"Comportamento"},
+        {L"settings.nav.section.routing", L"Roteamento"},
+        {L"settings.nav.section.system", L"Sistema"},
 
-        // --- pagina Geral ----------------------------------------------------
+        // --- pagina Geral (U2) -----------------------------------------------
         {L"settings.general.title", L"Geral"},
+        {L"settings.general.section.notifications", L"Notifica\u00e7\u00f5es"},
+        {L"settings.general.section.behavior", L"Comportamento"},
+        {L"settings.general.section.startup", L"Inicializa\u00e7\u00e3o"},
+        {L"settings.general.section.appearance", L"Apar\u00eancia"},
+        {L"settings.general.startupFailed",
+         L"N\u00e3o foi poss\u00edvel configurar a inicializa\u00e7\u00e3o com o Windows."},
         {L"settings.general.popupOnNewDevice",
          L"Avisar quando um novo dispositivo de \u00e1udio for conectado"},
         {L"settings.general.popupOnNewApp", L"Avisar quando um novo app come\u00e7ar a tocar"},
@@ -133,8 +155,10 @@ const Table& ptTable()
         {L"settings.general.language.pt", L"Portugu\u00eas"},
         {L"settings.general.language.en", L"English"},
 
-        // --- pagina Regras ---------------------------------------------------
+        // --- pagina Regras ----------------------------------------------------
         {L"settings.rules.title", L"Regras por app"},
+        {L"settings.rules.processLabel", L"Processo"},
+        {L"settings.rules.outputLabel", L"Sa\u00edda de \u00e1udio"},
         {L"settings.rules.hint",
          L"Digite o execut\u00e1vel (ex.: spotify.exe) e clique em Adicionar."},
         {L"settings.rules.placeholder", L"nome do processo"},
@@ -142,53 +166,73 @@ const Table& ptTable()
         {L"settings.rules.systemDefault", L"Padr\u00e3o do sistema"},
         {L"settings.rules.remove", L"Remover regra"},
         {L"settings.rules.enabled", L"Regra ativa"},
-        {L"settings.rules.empty", L"Nenhuma regra cadastrada."},
+        {L"settings.rules.active", L"Ativa"},
+        {L"settings.rules.empty", L"Nenhuma regra ainda \u2014 adicione a primeira."},
         {L"settings.rules.invalid", L"Informe um nome como \"spotify.exe\"."},
         {L"settings.rules.added", L"Regra salva."},
+        {L"settings.rules.updated", L"Regra j\u00e1 existia \u2014 atualizada."},
+        {L"settings.rules.removed", L"Regra removida."},
+        {L"settings.rules.restored", L"Regra restaurada."},
 
-        // --- pagina Perfis ---------------------------------------------------
+        // --- pagina Perfis ------------------------------------------------------
         {L"settings.profiles.title", L"Perfis"},
+        {L"settings.profiles.nameLabel", L"Nome"},
         {L"settings.profiles.placeholder", L"nome do perfil"},
         {L"settings.profiles.create", L"Criar"},
-        {L"settings.profiles.empty", L"Nenhum perfil criado."},
+        {L"settings.profiles.hint",
+         L"Perfis agrupam rotas para trocar v\u00e1rias sa\u00eddas de uma vez."},
+        {L"settings.profiles.empty", L"Nenhum perfil ainda \u2014 crie o primeiro."},
         {L"settings.profiles.remove", L"Remover perfil"},
         {L"settings.profiles.selectHint", L"Selecione um perfil para editar as rotas."},
         {L"settings.profiles.overrides", L"Rotas do perfil"},
         {L"settings.profiles.overrideProcess", L"Processo"},
-        {L"settings.profiles.overrideDevice", L"Dispositivo (deviceId)"},
+        {L"settings.profiles.overrideDevice", L"Sa\u00edda de \u00e1udio"},
         {L"settings.profiles.overrideProcessPlaceholder", L"foo.exe"},
-        {L"settings.profiles.overrideDevicePlaceholder", L"vazio = padr\u00e3o do sistema"},
         {L"settings.profiles.addOverride", L"Adicionar rota"},
         {L"settings.profiles.removeOverride", L"Remover rota"},
+        {L"settings.profiles.created", L"Perfil criado \u2014 adicione as rotas abaixo."},
+        {L"settings.profiles.exists", L"Perfil j\u00e1 existia \u2014 rotas preservadas."},
+        {L"settings.profiles.removed", L"Perfil removido."},
+        {L"settings.profiles.restored", L"Perfil restaurado."},
+        {L"settings.profiles.applied", L"Perfil aplicado."},
+        {L"settings.profiles.routeSaved", L"Rota salva."},
+        {L"settings.profiles.routeRemoved", L"Rota removida."},
+        {L"settings.profiles.routeRestored", L"Rota restaurada."},
         {L"settings.profiles.invalid", L"Informe um nome para o perfil."},
         {L"settings.profiles.invalidOverride", L"Informe processo (ex.: foo.exe)."},
         {L"settings.profiles.noRouter", L"Roteamento indispon\u00edvel no momento."},
 
-        // --- pagina Atalhos --------------------------------------------------
+        // --- pagina Atalhos ------------------------------------------------------
         {L"settings.hotkeys.title", L"Atalhos globais"},
         {L"settings.hotkeys.record", L"Gravar"},
         {L"settings.hotkeys.recording", L"Pressione a combina\u00e7\u00e3o\u2026"},
         {L"settings.hotkeys.none", L"N\u00e3o atribu\u00eddo"},
         {L"settings.hotkeys.hint", L"Gravando: Esc cancela, Delete desativa o atalho."},
+        {L"settings.hotkeys.active", L"Ativo"},
+        {L"settings.hotkeys.unassigned", L"Atalho desativado."},
+        {L"settings.hotkeys.cancelled", L"Grava\u00e7\u00e3o cancelada."},
+        {L"settings.hotkeys.conflict", L"Atalho n\u00e3o p\u00f4de ser registrado (conflito)."},
         {L"settings.hotkeys.mixer", L"Mixer"},
         {L"settings.hotkeys.cycleOutput", L"Pr\u00f3xima sa\u00edda"},
         {L"settings.hotkeys.profile", L"Perfil"},
         {L"settings.hotkeys.empty", L"Nenhum atalho configurado."},
 
-        // --- pagina Atualizacoes --------------------------------------------
+        // --- pagina Atualizacoes --------------------------------------------------
         {L"settings.updates.title", L"Atualiza\u00e7\u00f5es"},
         {L"settings.updates.autoCheck", L"Verificar atualiza\u00e7\u00f5es automaticamente"},
         {L"settings.updates.betaChannel", L"Receber atualiza\u00e7\u00f5es beta"},
         {L"settings.updates.checkNow", L"Verificar agora"},
         {L"settings.updates.checking", L"Verificando\u2026"},
+        {L"settings.updates.download", L"Baixar atualiza\u00e7\u00e3o"},
         {L"settings.updates.available", L"Atualiza\u00e7\u00e3o dispon\u00edvel:"},
         {L"settings.updates.upToDate", L"Voc\u00ea est\u00e1 na vers\u00e3o mais recente."},
-        {L"settings.updates.current",
-         concat(L"Vers\u00e3o instalada: ", SOUNDINT_VERSION_STRING)},
         {L"settings.updates.noService", L"Verifica\u00e7\u00e3o indispon\u00edvel."},
 
-        // --- pagina Sobre ----------------------------------------------------
+        // --- pagina Sobre ----------------------------------------------------------
         {L"settings.about.title", L"Sobre"},
+        {L"settings.about.tagline",
+         L"SoundInt vigia seus dispositivos de \u00e1udio e roteia a sa\u00edda "
+         L"por aplicativo."},
         {L"settings.about.version", concat(L"Vers\u00e3o ", SOUNDINT_VERSION_STRING)},
         {L"settings.about.license", L"Licen\u00e7a MIT"},
         {L"settings.about.repo", L"Reposit\u00f3rio"},
@@ -208,6 +252,7 @@ const Table& enTable()
         {L"common.apply", L"Apply"},
         {L"common.cancel", L"Cancel"},
         {L"common.close", L"Close"},
+        {L"common.undo", L"Undo"},
 
         {L"modal.newDevice.title", L"New audio device"},
         {L"modal.newDevice.primary", L"Set as default output"},
@@ -228,6 +273,8 @@ const Table& enTable()
         {L"mixer.defaultOutputLabel", L"System default"},
         {L"mixer.volume", L"Volume"},
         {L"mixer.mute", L"Mute"},
+        {L"mixer.emptyHint", L"Open an app and it will show up here."},
+        {L"mixer.route", L"Routing"},
 
         // --- settings window -------------------------------------------------
         {L"settings.title", L"Settings"},
@@ -237,9 +284,18 @@ const Table& enTable()
         {L"settings.nav.hotkeys", L"Shortcuts"},
         {L"settings.nav.updates", L"Updates"},
         {L"settings.nav.about", L"About"},
+        {L"settings.nav.section.behavior", L"Behavior"},
+        {L"settings.nav.section.routing", L"Routing"},
+        {L"settings.nav.section.system", L"System"},
 
-        // --- General page ----------------------------------------------------
+        // --- General page (U2) ------------------------------------------------
         {L"settings.general.title", L"General"},
+        {L"settings.general.section.notifications", L"Notifications"},
+        {L"settings.general.section.behavior", L"Behavior"},
+        {L"settings.general.section.startup", L"Startup"},
+        {L"settings.general.section.appearance", L"Appearance"},
+        {L"settings.general.startupFailed",
+         L"Could not configure startup with Windows."},
         {L"settings.general.popupOnNewDevice", L"Notify when a new audio device is connected"},
         {L"settings.general.popupOnNewApp", L"Notify when a new app starts playing"},
         {L"settings.general.rememberNewAppChoice", L"Remember output choice per app"},
@@ -254,8 +310,10 @@ const Table& enTable()
         {L"settings.general.language.pt", L"Portugu\u00eas"},
         {L"settings.general.language.en", L"English"},
 
-        // --- Rules page ------------------------------------------------------
+        // --- Rules page ---------------------------------------------------------
         {L"settings.rules.title", L"Rules per app"},
+        {L"settings.rules.processLabel", L"Process"},
+        {L"settings.rules.outputLabel", L"Audio output"},
         {L"settings.rules.hint",
          L"Type the executable (e.g. spotify.exe) and click Add."},
         {L"settings.rules.placeholder", L"process name"},
@@ -263,53 +321,72 @@ const Table& enTable()
         {L"settings.rules.systemDefault", L"System default"},
         {L"settings.rules.remove", L"Remove rule"},
         {L"settings.rules.enabled", L"Rule enabled"},
-        {L"settings.rules.empty", L"No rules yet."},
+        {L"settings.rules.active", L"Active"},
+        {L"settings.rules.empty", L"No rules yet \u2014 add the first one."},
         {L"settings.rules.invalid", L"Enter a name like \"spotify.exe\"."},
         {L"settings.rules.added", L"Rule saved."},
+        {L"settings.rules.updated", L"Rule already existed \u2014 updated."},
+        {L"settings.rules.removed", L"Rule removed."},
+        {L"settings.rules.restored", L"Rule restored."},
 
-        // --- Profiles page ---------------------------------------------------
+        // --- Profiles page --------------------------------------------------------
         {L"settings.profiles.title", L"Profiles"},
+        {L"settings.profiles.nameLabel", L"Name"},
         {L"settings.profiles.placeholder", L"profile name"},
         {L"settings.profiles.create", L"Create"},
-        {L"settings.profiles.empty", L"No profiles yet."},
+        {L"settings.profiles.hint",
+         L"Profiles group routes to switch several outputs at once."},
+        {L"settings.profiles.empty", L"No profiles yet \u2014 create the first one."},
         {L"settings.profiles.remove", L"Remove profile"},
         {L"settings.profiles.selectHint", L"Select a profile to edit its routes."},
         {L"settings.profiles.overrides", L"Profile routes"},
         {L"settings.profiles.overrideProcess", L"Process"},
-        {L"settings.profiles.overrideDevice", L"Device (deviceId)"},
+        {L"settings.profiles.overrideDevice", L"Audio output"},
         {L"settings.profiles.overrideProcessPlaceholder", L"foo.exe"},
-        {L"settings.profiles.overrideDevicePlaceholder", L"empty = system default"},
         {L"settings.profiles.addOverride", L"Add route"},
         {L"settings.profiles.removeOverride", L"Remove route"},
+        {L"settings.profiles.created", L"Profile created \u2014 add routes below."},
+        {L"settings.profiles.exists", L"Profile already existed \u2014 routes preserved."},
+        {L"settings.profiles.removed", L"Profile removed."},
+        {L"settings.profiles.restored", L"Profile restored."},
+        {L"settings.profiles.applied", L"Profile applied."},
+        {L"settings.profiles.routeSaved", L"Route saved."},
+        {L"settings.profiles.routeRemoved", L"Route removed."},
+        {L"settings.profiles.routeRestored", L"Route restored."},
         {L"settings.profiles.invalid", L"Enter a profile name."},
         {L"settings.profiles.invalidOverride", L"Enter a process (e.g. foo.exe)."},
         {L"settings.profiles.noRouter", L"Routing is unavailable right now."},
 
-        // --- Shortcuts page --------------------------------------------------
+        // --- Shortcuts page ----------------------------------------------------------
         {L"settings.hotkeys.title", L"Global shortcuts"},
         {L"settings.hotkeys.record", L"Record"},
         {L"settings.hotkeys.recording", L"Press the combination\u2026"},
         {L"settings.hotkeys.none", L"Unassigned"},
         {L"settings.hotkeys.hint", L"Recording: Esc cancels, Delete unassigns the shortcut."},
+        {L"settings.hotkeys.active", L"Enabled"},
+        {L"settings.hotkeys.unassigned", L"Shortcut unassigned."},
+        {L"settings.hotkeys.cancelled", L"Recording cancelled."},
+        {L"settings.hotkeys.conflict", L"Shortcut could not be registered (conflict)."},
         {L"settings.hotkeys.mixer", L"Mixer"},
         {L"settings.hotkeys.cycleOutput", L"Next output"},
         {L"settings.hotkeys.profile", L"Profile"},
         {L"settings.hotkeys.empty", L"No shortcuts configured."},
 
-        // --- Updates page ----------------------------------------------------
+        // --- Updates page --------------------------------------------------------------
         {L"settings.updates.title", L"Updates"},
         {L"settings.updates.autoCheck", L"Check for updates automatically"},
         {L"settings.updates.betaChannel", L"Receive beta updates"},
         {L"settings.updates.checkNow", L"Check now"},
         {L"settings.updates.checking", L"Checking\u2026"},
+        {L"settings.updates.download", L"Download update"},
         {L"settings.updates.available", L"Update available:"},
         {L"settings.updates.upToDate", L"You are on the latest version."},
-        {L"settings.updates.current",
-         concat(L"Installed version: ", SOUNDINT_VERSION_STRING)},
         {L"settings.updates.noService", L"Update check unavailable."},
 
-        // --- About page ------------------------------------------------------
+        // --- About page -------------------------------------------------------------------
         {L"settings.about.title", L"About"},
+        {L"settings.about.tagline",
+         L"SoundInt watches your audio devices and routes output per app."},
         {L"settings.about.version", concat(L"Version ", SOUNDINT_VERSION_STRING)},
         {L"settings.about.license", L"MIT License"},
         {L"settings.about.repo", L"Repository"},

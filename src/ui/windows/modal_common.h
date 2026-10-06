@@ -175,6 +175,10 @@ public:
 protected:
     ModalWindow() = default;
 
+    // DPI do monitor mudou (janela arrastada entre telas): reenquadra com o
+    // novo scale em vez de esperar o proximo evento.
+    bool handleMessage(UINT msg, WPARAM w, LPARAM l, LRESULT& result) override;
+
     // Registra controle: ordem de registro = ordem de foco (Tab) e de desenho.
     void addControl(controls::InteractiveControl& control, bool defaultFocus = false);
     // Reseta foco/captura a cada exibicao (janela reutilizada).
@@ -182,8 +186,10 @@ protected:
 
     // Tamanho do conteudo em px logicos (sem escala) para o frame da janela.
     virtual Size logicalContentSize() const = 0;
-    // Posiciona os controles em px fisicos (escala ja aplicada).
-    virtual void layoutControls(float scale) = 0;
+    // Posiciona os controles em px fisicos. `client` e o tamanho REAL do
+    // cliente (unica fonte de verdade: pode ser menor que
+    // logicalContentSize()*scale apos o clamp da area de trabalho).
+    virtual void layoutControls(float scale, const Size& client) = 0;
     virtual void paint(IRenderTarget& rt, float scale, const tokens::Palette& pal) = 0;
     virtual void onPrimaryAction() = 0;    // Enter
     virtual void onCancelAction() = 0;     // Esc / botao secundario
@@ -203,6 +209,8 @@ protected:
     bool onKey(const KeyEvent& e) override;
     void onRender(IRenderTarget& rt, const Rect& client) override;
     void onDestroy() override;
+    // Cursor: mao sobre qualquer controle interativo (WM_SETCURSOR da base).
+    CursorShape onQueryCursor(float x, float y) override;
 
 private:
     controls::InteractiveControl* hitTest(float x, float y) const;

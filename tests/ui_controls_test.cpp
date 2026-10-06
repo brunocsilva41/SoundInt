@@ -1,5 +1,7 @@
 // ============================================================================
 // Testes da biblioteca de controles (Track E) — somente IRenderTarget + tokens.
+// Cobrem: API aditiva (popupBounds/setTrailingInset), escala DPI completa,
+// anti-UAF do click, estados disabled e espessuras em pixel inteiro.
 // ============================================================================
 #include "doctest.h"
 
@@ -21,6 +23,7 @@ public:
         Rect rect{};
         Color color{};
         std::wstring text;
+        float strokeW = 0.f;   // espessura (op "stroke")
     };
 
     std::vector<Call> calls;
@@ -38,6 +41,17 @@ public:
         return n;
     }
 
+    // Primeira chamada da operacao (ou nullptr).
+    const Call* find(const std::wstring& op) const
+    {
+        for (const Call& c : calls) {
+            if (c.op == op) {
+                return &c;
+            }
+        }
+        return nullptr;
+    }
+
     void clear(const Color& color) override { calls.push_back({L"clear", {}, color, {}}); }
 
     void fillRoundedRect(const Rect& rect, float, const Color& color) override
@@ -45,9 +59,10 @@ public:
         calls.push_back({L"fill", rect, color, {}});
     }
 
-    void strokeRoundedRect(const Rect& rect, float, float, const Color& color) override
+    void strokeRoundedRect(const Rect& rect, float, float strokeWidth,
+                           const Color& color) override
     {
-        calls.push_back({L"stroke", rect, color, {}});
+        calls.push_back({L"stroke", rect, color, {}, strokeWidth});
     }
 
     void drawLine(float, float, float, float, float, const Color& color) override
@@ -55,9 +70,9 @@ public:
         calls.push_back({L"line", {}, color, {}});
     }
 
-    void drawText(std::wstring_view text, const Rect& box, const TextStyle&) override
+    void drawText(std::wstring_view text, const Rect& box, const TextStyle& style) override
     {
-        calls.push_back({L"text", box, {}, std::wstring(text)});
+        calls.push_back({L"text", box, style.color, std::wstring(text)});
     }
 
     Size measureText(std::wstring_view text, const TextStyle& style) override
@@ -66,9 +81,9 @@ public:
         return {w, style.fontSize};
     }
 
-    void drawGlyph(std::wstring_view glyph, const Rect& box, const TextStyle&) override
+    void drawGlyph(std::wstring_view glyph, const Rect& box, const TextStyle& style) override
     {
-        calls.push_back({L"glyph", box, {}, std::wstring(glyph)});
+        calls.push_back({L"glyph", box, style.color, std::wstring(glyph)});
     }
 
     void pushClip(const Rect&) override
@@ -85,6 +100,31 @@ public:
         --clipDepth;
         calls.push_back({L"pop", {}, {}, {}});
     }
+};
+
+bool sameColor(const Color& a, const Color& b)
+{
+    return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
+}
+
+// Alias para o registro de chamadas do mock (legibilidade nos testes).
+using Call = MockRenderTarget::Call;
+
+// Registra o handler global de invalidacao e devolve ao estado neutro no
+// fim do escopo (RAII — nao vaza para os outros casos de teste).
+class InvalidateGuard {
+public:
+    explicit InvalidateGuard(std::vector<std::wstring>* log)
+    {
+        setInvalidateHandler(
+            [](void* context) {
+                auto* order = static_cast<std::vector<std::wstring>*>(context);
+                order->push_back(L"invalidate");
+            },
+            log);
+    }
+
+    ~InvalidateGuard() { setInvalidateHandler(nullptr, nullptr); }
 };
 
 PointerEvent makePointer(PointerKind kind, float x, float y,
@@ -224,6 +264,75 @@ TEST_CASE("slider: arrasto com captura")
     CHECK(s.value() == doctest::Approx(0.f));
 }
 
+TEST_CASE("slider: pino escalado por scale_ mapeia o valor corretamente")
+{
+    // 150%: pino 16*1.5 = 24 -> pad 12; span = 200 - 24 = 176.
+    const Rect b{0.f, 0.f, 200.f, 48.f};
+    CHECK(Slider::valueFromX(12.f, b, 24.f) == doctest::Approx(0.f));
+    CHECK(Slider::xFromValue(1.f, b, 24.f) == doctest::Approx(188.f));
+    CHECK(Slider::valueFromX(100.f, b, 24.f) == doctest::Approx(88.f / 176.f));
+
+    Slider s;
+    s.setScale(1.5f);
+    s.setBounds(b);
+    CHECK(s.measure(200.f).h == doctest::Approx(48.f));
+
+    // Arrasto ponteiro usa o mapeamento escalado (borda direita = 1.0).
+    CHECK(s.onPointer(makePointer(PointerKind::Down, 199.f, 24.f, MouseButton::Left)));
+    CHECK(s.value() == doctest::Approx(1.f));
+    CHECK(s.onPointer(makePointer(PointerKind::Move, 12.f, 24.f)));
+    CHECK(s.value() == doctest::Approx(0.f));
+}
+
+TEST_CASE("slider: render pinta overlay de hover/pressionado (afordancia)")
+{
+    MockRenderTarget rt;
+    const tokens::Palette palette = tokens::lightPalette();
+
+    Slider s;
+    s.setBounds({0.f, 0.f, 200.f, 32.f});
+    s.setValue(0.5f);
+
+    // Neutro: nenhum fill com hover/pressed.
+    s.render(rt, palette);
+    CHECK_FALSE(rt.find(L"fill") == nullptr);
+    bool tinted = false;
+    for (const auto& c : rt.calls) {
+        if (c.op == L"fill" && (sameColor(c.color, palette.hover) ||
+                                sameColor(c.color, palette.pressed))) {
+            tinted = true;
+        }
+    }
+    CHECK_FALSE(tinted);
+
+    // Pressionado: overlay pressed sobre os bounds.
+    rt.calls.clear();
+    CHECK(s.onPointer(makePointer(PointerKind::Down, 100.f, 16.f, MouseButton::Left)));
+    s.render(rt, palette);
+    tinted = false;
+    for (const auto& c : rt.calls) {
+        if (c.op == L"fill" && sameColor(c.color, palette.pressed) &&
+            c.rect.w == doctest::Approx(200.f) && c.rect.h == doctest::Approx(32.f)) {
+            tinted = true;
+        }
+    }
+    CHECK(tinted);
+
+    // Hover puro (sem pressao): overlay hover.
+    rt.calls.clear();
+    CHECK(s.onPointer(makePointer(PointerKind::Up, 100.f, 16.f, MouseButton::Left)));
+    CHECK(s.onPointer(makePointer(PointerKind::Move, 100.f, 16.f)));
+    CHECK(s.hovered());
+    s.render(rt, palette);
+    tinted = false;
+    for (const auto& c : rt.calls) {
+        if (c.op == L"fill" && sameColor(c.color, palette.hover)) {
+            tinted = true;
+        }
+    }
+    CHECK(tinted);
+}
+
 // ---------------------------------------------------------------------------
 // Button
 // ---------------------------------------------------------------------------
@@ -275,6 +384,65 @@ TEST_CASE("button: clique por ponteiro, teclado e estados")
     CHECK(b.measure(200.f).h == doctest::Approx(tokens::kControlHeight));
 }
 
+TEST_CASE("button: click invalida ANTES do callback (ordem anti-UAF)")
+{
+    std::vector<std::wstring> order;
+    {
+        InvalidateGuard guard(&order);
+
+        Button b;
+        b.setBounds({0.f, 0.f, 100.f, 32.f});
+        b.setFocused(true);
+        b.setOnClick([&order] { order.push_back(L"click"); });
+
+        // Teclado: click() direto -> exatamente invalidate, click (nessa ordem).
+        CHECK(b.onKey(makeKey(Key::Space)));
+        REQUIRE(order.size() == 2u);
+        CHECK(order[0] == L"invalidate");
+        CHECK(order[1] == L"click");
+    }
+    // RAII: o guard devolve o handler global ao neutro ao sair do escopo.
+}
+
+TEST_CASE("button: variantes Primary/Danger e estado disabled coerentes")
+{
+    MockRenderTarget rt;
+    const tokens::Palette palette = tokens::lightPalette();
+
+    Button primary;
+    primary.setBounds({0.f, 0.f, 100.f, 32.f});
+    primary.setText(L"OK");
+    primary.setVariant(Button::Variant::Primary);
+    primary.render(rt, palette);
+    const Call* fill = rt.find(L"fill");
+    REQUIRE(fill != nullptr);
+    CHECK(sameColor(fill->color, palette.accent));
+
+    rt.calls.clear();
+    Button danger;
+    danger.setBounds({0.f, 0.f, 100.f, 32.f});
+    danger.setText(L"Excluir");
+    danger.setVariant(Button::Variant::Danger);
+    danger.render(rt, palette);
+    fill = rt.find(L"fill");
+    REQUIRE(fill != nullptr);
+    CHECK(sameColor(fill->color, palette.danger));
+    const Call* text = rt.find(L"text");
+    REQUIRE(text != nullptr);
+    CHECK(sameColor(text->color, palette.dangerFg));
+
+    // Desabilitado: fill surfaceAlt + texto secundario, em qualquer variante.
+    rt.calls.clear();
+    danger.setEnabled(false);
+    danger.render(rt, palette);
+    fill = rt.find(L"fill");
+    REQUIRE(fill != nullptr);
+    CHECK(sameColor(fill->color, palette.surfaceAlt));
+    text = rt.find(L"text");
+    REQUIRE(text != nullptr);
+    CHECK(sameColor(text->color, palette.textSecondary));
+}
+
 // ---------------------------------------------------------------------------
 // Toggle
 // ---------------------------------------------------------------------------
@@ -321,6 +489,33 @@ TEST_CASE("toggle: valor, onChanged e geometria do pino")
     const Rect knob = Toggle::knobRect(rb, true);
     CHECK(knob.x >= track.x);
     CHECK(knob.x + knob.w <= track.x + track.w);
+}
+
+TEST_CASE("toggle: trilha 48px e pino proporcionais ao scale_")
+{
+    const Rect b{0.f, 0.f, 100.f, 48.f};
+
+    // Geometria pura com scale explicito: 48x24 logicos -> 72x36 a 150%.
+    const Rect track = Toggle::trackRect(b, 1.5f);
+    CHECK(track.w == doctest::Approx(72.f));
+    CHECK(track.h == doctest::Approx(36.f));
+    CHECK(track.x == doctest::Approx(14.f));   // (100-72)/2
+    CHECK(track.y == doctest::Approx(6.f));    // (48-36)/2
+
+    const Rect knobOn = Toggle::knobRect(b, true, 1.5f);
+    const Rect knobOff = Toggle::knobRect(b, false, 1.5f);
+    CHECK(knobOn.w == doctest::Approx(24.f));   // 16 * 1.5
+    CHECK(knobOn.h == doctest::Approx(24.f));
+    CHECK(knobOn.x > knobOff.x);
+    CHECK(knobOn.x + knobOn.w <= track.x + track.w);
+
+    // A instancia usa scale_ na geometria e na medida.
+    Toggle t;
+    t.setScale(1.5f);
+    t.setBounds(b);
+    t.setValue(true);
+    CHECK(t.knobRect().x == doctest::Approx(knobOn.x));
+    CHECK(t.measure(10.f).h == doctest::Approx(48.f));
 }
 
 // ---------------------------------------------------------------------------
@@ -429,6 +624,82 @@ TEST_CASE("dropdown: navegacao por wheel e teclado")
     CHECK(dd.selectedIndex() == 2u);
 }
 
+TEST_CASE("dropdown: isPopupOpen e popupBounds (API aditiva)")
+{
+    Dropdown dd;
+    dd.setBounds({10.f, 10.f, 200.f, 32.f});
+    dd.setItems({L"A", L"B"});
+
+    // Fechado: sem popup, bounds vazio.
+    CHECK_FALSE(dd.isPopupOpen());
+    CHECK(dd.popupBounds().w == doctest::Approx(0.f));
+    CHECK(dd.popupBounds().h == doctest::Approx(0.f));
+
+    // Aberto: espelha popupRect().
+    dd.setExpanded(true);
+    CHECK(dd.isPopupOpen());
+    const Rect pop = dd.popupRect();
+    const Rect open = dd.popupBounds();
+    CHECK(open.x == doctest::Approx(pop.x));
+    CHECK(open.y == doctest::Approx(pop.y));
+    CHECK(open.w == doctest::Approx(pop.w));
+    CHECK(open.h == doctest::Approx(pop.h));
+
+    // Recolhido de novo: volta a vazio.
+    dd.setExpanded(false);
+    CHECK_FALSE(dd.isPopupOpen());
+    CHECK(dd.popupBounds().w == doctest::Approx(0.f));
+    CHECK(dd.popupBounds().h == doctest::Approx(0.f));
+}
+
+TEST_CASE("dropdown: campo e popup em 150% sem zona morta de hit-test")
+{
+    Dropdown dd;
+    dd.setScale(1.5f);
+    dd.setBounds({0.f, 0.f, 200.f, 48.f});
+    dd.setItems({L"A", L"B", L"C"});
+    dd.setSelectedIndex(0u);
+
+    // O campo ocupa os 48px do controle (antes: 32 fixos -> zona morta).
+    const Rect field = dd.fieldRect();
+    CHECK(field.h == doctest::Approx(48.f));
+
+    // Down em y=40 (abaixo dos 32px antigos) e capturado pelo campo.
+    CHECK(dd.onPointer(makePointer(PointerKind::Down, 100.f, 40.f, MouseButton::Left)));
+    CHECK(dd.pressed());
+    CHECK(dd.onPointer(makePointer(PointerKind::Up, 100.f, 40.f, MouseButton::Left)));
+    CHECK(dd.isPopupOpen());
+
+    // Popup: itens de 48px, hit correto, medidas coerentes.
+    const Rect pop = dd.popupBounds();
+    CHECK(pop.y == doctest::Approx(48.f));
+    CHECK(pop.h == doctest::Approx(144.f));
+    CHECK(dd.itemRect(0u).h == doctest::Approx(48.f));
+    CHECK(dd.hitItem(100.f, 48.f + 48.f + 10.f) == 1u);
+    CHECK(dd.requiredHeight() == doctest::Approx(192.f));
+    CHECK(dd.measure(200.f).h == doctest::Approx(48.f));
+}
+
+TEST_CASE("dropdown: desabilitado pinta surfaceAlt e texto secundario")
+{
+    MockRenderTarget rt;
+    const tokens::Palette palette = tokens::lightPalette();
+
+    Dropdown dd;
+    dd.setBounds({0.f, 0.f, 200.f, 32.f});
+    dd.setItems({L"A", L"B"});
+    dd.setSelectedIndex(0u);
+    dd.setEnabled(false);
+    dd.render(rt, palette);
+
+    const Call* fill = rt.find(L"fill");
+    REQUIRE(fill != nullptr);
+    CHECK(sameColor(fill->color, palette.surfaceAlt));
+    const Call* text = rt.find(L"text");
+    REQUIRE(text != nullptr);
+    CHECK(sameColor(text->color, palette.textSecondary));
+}
+
 // ---------------------------------------------------------------------------
 // ListRow / Badge
 // ---------------------------------------------------------------------------
@@ -456,6 +727,61 @@ TEST_CASE("listrow: clique, hover e medida")
     CHECK(row.measure(300.f).h == doctest::Approx(tokens::kRowHeight));
 }
 
+TEST_CASE("listrow: trailingInset reserva espaco a direita do texto")
+{
+    MockRenderTarget rt;
+    const tokens::Palette palette = tokens::lightPalette();
+
+    ListRow row;
+    row.setBounds({0.f, 0.f, 300.f, 40.f});
+    row.setTitle(L"Spotify");
+    CHECK(row.trailingInset() == doctest::Approx(0.f));
+
+    row.render(rt, palette);
+    const Call* base = rt.find(L"text");
+    REQUIRE(base != nullptr);
+    CHECK(base->rect.w > 0.f);
+    const float baseW = base->rect.w;
+
+    // Reserva de 28px: o texto encolhe exatamente esse tanto.
+    row.setTrailingInset(28.f);
+    CHECK(row.trailingInset() == doctest::Approx(28.f));
+    rt.calls.clear();
+    row.render(rt, palette);
+    const Call* inset = rt.find(L"text");
+    REQUIRE(inset != nullptr);
+    CHECK(inset->rect.w == doctest::Approx(baseW - 28.f));
+    CHECK(inset->rect.x == doctest::Approx(base->rect.x));   // esquerda fixa
+}
+
+TEST_CASE("listrow: paddings e caixa de icone escalam com scale_")
+{
+    MockRenderTarget rt;
+    const tokens::Palette palette = tokens::lightPalette();
+
+    ListRow row;
+    row.setScale(1.5f);
+    row.setBounds({0.f, 0.f, 300.f, 60.f});
+    row.setGlyph(tokens::kIconSpeaker);
+    row.setTitle(L"Spotify");
+    row.setTrailingInset(30.f);
+    row.render(rt, palette);
+
+    // Glifo em caixa de 20*1.5 = 30, com padding 8*1.5 = 12.
+    const Call* glyph = rt.find(L"glyph");
+    REQUIRE(glyph != nullptr);
+    CHECK(glyph->rect.x == doctest::Approx(12.f));
+    CHECK(glyph->rect.w == doctest::Approx(30.f));
+
+    // Texto: x = 12 + 30 + 12 = 54; direita = 300 - 12 - 30 = 258.
+    const Call* text = rt.find(L"text");
+    REQUIRE(text != nullptr);
+    CHECK(text->rect.x == doctest::Approx(54.f));
+    CHECK(text->rect.w == doctest::Approx(258.f - 54.f));
+
+    CHECK(row.measure(300.f).h == doctest::Approx(60.f));
+}
+
 TEST_CASE("badge: medida natural")
 {
     MockRenderTarget rt;
@@ -466,6 +792,32 @@ TEST_CASE("badge: medida natural")
     CHECK(nat.w == doctest::Approx(36.f + tokens::kSpace2 * 2.f));
     CHECK(nat.h == doctest::Approx(tokens::kControlHeight));
     CHECK(badge.measure(100.f).h == doctest::Approx(tokens::kControlHeight));
+}
+
+TEST_CASE("badge: medida natural e disabled seguem scale_")
+{
+    MockRenderTarget rt;
+    const tokens::Palette palette = tokens::lightPalette();
+
+    Badge badge;
+    badge.setScale(1.5f);
+    badge.setText(L"v1.2.3");   // 6 chars * (12*1.5) * 0.5 = 54
+
+    const Size nat = badge.naturalSize(rt);
+    CHECK(nat.w == doctest::Approx(54.f + tokens::kSpace2 * 1.5f * 2.f));
+    CHECK(nat.h == doctest::Approx(48.f));
+    CHECK(badge.measure(100.f).h == doctest::Approx(48.f));
+
+    // Desabilitado: neutro (surfaceAlt + texto secundario) mesmo com Danger.
+    badge.setKind(Badge::Kind::Danger);
+    badge.setEnabled(false);
+    badge.render(rt, palette);
+    const Call* fill = rt.find(L"fill");
+    REQUIRE(fill != nullptr);
+    CHECK(sameColor(fill->color, palette.surfaceAlt));
+    const Call* text = rt.find(L"text");
+    REQUIRE(text != nullptr);
+    CHECK(sameColor(text->color, palette.textSecondary));
 }
 
 // ---------------------------------------------------------------------------
@@ -526,6 +878,90 @@ TEST_CASE("listpanel: layout em cascata, scroll e medida")
     CHECK(panel.contentHeight() == doctest::Approx(84.f));   // 2*40 + 1*4
 }
 
+TEST_CASE("listpanel: gap e passo de scroll escalam com scale_")
+{
+    ListPanel panel;
+    panel.setScale(1.5f);
+    panel.setBounds({0.f, 0.f, 200.f, 40.f});   // viewport baixo p/ ver o passo
+
+    ListRow r1;
+    ListRow r2;
+    r1.setScale(1.5f);
+    r2.setScale(1.5f);
+    panel.addControl(&r1);
+    panel.addControl(&r2);
+
+    // 2 linhas de 60 + 1 gap de 6 (kSpace1 * 1.5).
+    CHECK(panel.contentHeight() == doctest::Approx(126.f));
+    CHECK(panel.maxScrollY() == doctest::Approx(86.f));
+
+    panel.layout();
+    CHECK(r1.bounds().y == doctest::Approx(0.f));
+    CHECK(r1.bounds().h == doctest::Approx(60.f));
+    CHECK(r2.bounds().y == doctest::Approx(66.f));
+
+    // Wheel: 1 notch = kScrollStep * 1.5 = 60.
+    PointerEvent wheel = makePointer(PointerKind::Wheel, 100.f, 20.f, MouseButton::None, -1.f);
+    CHECK(panel.onPointer(wheel));
+    CHECK(panel.scrollY() == doctest::Approx(60.f));
+
+    // gap logico via setGap tambem escala (4 logicos -> 6 fisicos).
+    ListPanel custom;
+    custom.setScale(1.5f);
+    custom.setBounds({0.f, 0.f, 200.f, 10.f});
+    custom.setGap(tokens::kSpace1);
+    ListRow a;
+    a.setScale(1.5f);
+    ListRow b;
+    b.setScale(1.5f);
+    custom.addControl(&a);
+    custom.addControl(&b);
+    CHECK(custom.contentHeight() == doctest::Approx(126.f));
+}
+
+// ---------------------------------------------------------------------------
+// Espessuras (grid de pixels inteiros)
+// ---------------------------------------------------------------------------
+TEST_CASE("controles: espessuras de traco em pixel inteiro (1px; 2px em 200%)")
+{
+    const tokens::Palette palette = tokens::lightPalette();
+
+    for (const float scale : {1.f, 1.5f}) {
+        MockRenderTarget rt;
+        Button button;
+        button.setBounds({0.f, 0.f, 120.f, 32.f});
+        button.setScale(scale);
+        button.setFocused(true);
+        button.render(rt, palette);
+
+        Slider slider;
+        slider.setBounds({0.f, 40.f, 200.f, 32.f});
+        slider.setScale(scale);
+        slider.render(rt, palette);
+
+        REQUIRE(rt.count(L"stroke") > 0);
+        for (const Call& c : rt.calls) {
+            if (c.op == L"stroke") {
+                CHECK(c.strokeW == doctest::Approx(1.f));   // nunca 1.5px
+            }
+        }
+    }
+
+    {
+        MockRenderTarget rt;
+        Button button;
+        button.setBounds({0.f, 0.f, 120.f, 64.f});
+        button.setScale(2.f);
+        button.setFocused(true);
+        button.render(rt, palette);
+        for (const Call& c : rt.calls) {
+            if (c.op == L"stroke") {
+                CHECK(c.strokeW == doctest::Approx(2.f));
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Render (smoke) — clip equilibrado, sem dependencia do Track D
 // ---------------------------------------------------------------------------
@@ -560,7 +996,7 @@ TEST_CASE("render: smoke no mock e clip balanceado")
 
     Badge badge;
     badge.setBounds({0.f, 164.f, 60.f, 32.f});
-    badge.setText(L"v1");
+    badge.setText(L"v");
     badge.setKind(Badge::Kind::Accent);
     badge.render(rt, palette);
 

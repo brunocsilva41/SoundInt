@@ -1,5 +1,7 @@
 #include "ui/controls/slider.h"
 
+#include "ui/controls/metrics.h"
+
 namespace soundint::ui::controls {
 
 namespace {
@@ -16,11 +18,11 @@ float clamp01(float v)
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// Logica pura x <-> valor
+// Logica pura x <-> valor (thumbD em px; a instancia passa kThumbD*scale_)
 // ---------------------------------------------------------------------------
-float Slider::valueFromX(float x, const Rect& b)
+float Slider::valueFromX(float x, const Rect& b, float thumbD)
 {
-    const float pad = kThumbD * 0.5f;
+    const float pad = thumbD * 0.5f;
     const float span = b.w - pad * 2.f;
     if (span <= 0.f) {
         return 0.f;
@@ -28,9 +30,9 @@ float Slider::valueFromX(float x, const Rect& b)
     return clamp01((x - (b.x + pad)) / span);
 }
 
-float Slider::xFromValue(float value, const Rect& b)
+float Slider::xFromValue(float value, const Rect& b, float thumbD)
 {
-    const float pad = kThumbD * 0.5f;
+    const float pad = thumbD * 0.5f;
     const float span = b.w - pad * 2.f;
     if (span <= 0.f) {
         return b.x + pad;
@@ -58,10 +60,13 @@ void Slider::applyValue(float v)
         return;
     }
     value_ = c;
+    // RESILIENCIA A UAF: onChanged_ pode recriar a linha dona deste slider
+    // (rebuild sincrono). Invalidamos ANTES e nao tocamos em `this` depois
+    // que o callback roda.
+    invalidate();
     if (onChanged_) {
         onChanged_(value_);
     }
-    invalidate();
 }
 
 void Slider::addDelta(float delta)
@@ -70,7 +75,8 @@ void Slider::addDelta(float delta)
 }
 
 // ---------------------------------------------------------------------------
-// Desenho: trilho (surfaceAlt) + parte preenchida e pino em accent
+// Desenho: trilho (surfaceAlt) + parte preenchida e pino em accent; trilho e
+// pino proporcionais a scale_. Hover/pressionado pintam overlay (afordancia).
 // ---------------------------------------------------------------------------
 void Slider::render(IRenderTarget& rt, const tokens::Palette& palette)
 {
@@ -78,26 +84,32 @@ void Slider::render(IRenderTarget& rt, const tokens::Palette& palette)
         return;
     }
 
+    const float thumbD = kThumbD * scale_;
+    const float trackH = kTrackH * scale_;
+    const float pad = thumbD * 0.5f;
     const float cy = bounds_.y + bounds_.h * 0.5f;
-    const float pad = kThumbD * 0.5f;
     const float trackW = (bounds_.w > pad * 2.f) ? bounds_.w - pad * 2.f : 0.f;
-    const float trackY = cy - kTrackH * 0.5f;
-    const float thumbX = xFromValue(value_, bounds_);
+    const float trackY = cy - trackH * 0.5f;
+    const float thumbX = xFromValue(value_, bounds_, thumbD);
     const Color fill = enabled_ ? palette.accent : palette.border;
 
-    const Rect track{bounds_.x + pad, trackY, trackW, kTrackH};
-    rt.fillRoundedRect(track, tokens::kRadiusSm, palette.surfaceAlt);
+    const float radiusSm = metrics::radius(tokens::kRadiusSm, scale_);
+    const float thumbR = metrics::radius(tokens::kRadiusMd, scale_);
+
+    const Rect track{bounds_.x + pad, trackY, trackW, trackH};
+    rt.fillRoundedRect(track, radiusSm, palette.surfaceAlt);
 
     const float filledW = thumbX - track.x;
     if (filledW > 0.f) {
-        const Rect filled{track.x, trackY, filledW, kTrackH};
-        rt.fillRoundedRect(filled, tokens::kRadiusSm, fill);
+        const Rect filled{track.x, trackY, filledW, trackH};
+        rt.fillRoundedRect(filled, radiusSm, fill);
     }
 
-    const Rect thumb{thumbX - kThumbD * 0.5f, cy - kThumbD * 0.5f, kThumbD, kThumbD};
-    rt.fillRoundedRect(thumb, tokens::kRadiusMd, fill);
-    rt.strokeRoundedRect(thumb, tokens::kRadiusMd, 1.5f, palette.surface);
+    const Rect thumb{thumbX - pad, cy - pad, thumbD, thumbD};
+    rt.fillRoundedRect(thumb, thumbR, fill);
+    rt.strokeRoundedRect(thumb, thumbR, metrics::stroke(scale_), palette.surface);
 
+    // Afordancia de hover/pressionado + anel de foco (uniforme com os demais).
     renderOverlay(rt, palette);
     renderFocus(rt, palette);
 }
@@ -119,13 +131,13 @@ bool Slider::onPointer(const PointerEvent& e)
         captured_ = true;
         pressed_ = true;
         hovered_ = true;
-        applyValue(valueFromX(e.x, bounds_));
+        applyValue(valueFromX(e.x, bounds_, kThumbD * scale_));
         invalidate();
         return true;
 
     case PointerKind::Move:
         if (captured_) {
-            applyValue(valueFromX(e.x, bounds_));
+            applyValue(valueFromX(e.x, bounds_, kThumbD * scale_));
             return true;
         }
         if (updateHover(e.x, e.y)) {
@@ -183,7 +195,7 @@ bool Slider::onKey(const KeyEvent& e)
 
 Size Slider::measure(float constraintWidth)
 {
-    return {constraintWidth, tokens::kControlHeight};
+    return {constraintWidth, tokens::kControlHeight * scale_};
 }
 
 }  // namespace soundint::ui::controls

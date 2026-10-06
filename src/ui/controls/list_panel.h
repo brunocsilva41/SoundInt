@@ -5,6 +5,8 @@
 // render() chama layout(), aplica pushClip(bounds_) e desenha os filhos.
 // Wheel (dentro dos bounds) ajusta scrollY em kScrollStep por notch
 // (cima = diminui o offset, mostrando o inicio da lista).
+// DPI: gap (px logicos) e passo de scroll escalam com scale(); as alturas
+// vem de measure() dos filhos, cada um com seu proprio scale().
 // ============================================================================
 #pragma once
 
@@ -22,6 +24,7 @@ public:
     void clear();                        // remove da lista (nao deleta)
     const std::vector<Control*>& children() const { return children_; }
 
+    // Gap entre filhos em px LOGICOS (efetivo = gap * scale()).
     void setGap(float gap) { gap_ = gap; }
     float gap() const { return gap_; }
 
@@ -39,6 +42,7 @@ public:
     Size measure(float constraintWidth) override;
 
 private:
+    float effectiveGap() const;   // gap_ * scale_ (px fisicos)
     float childHeight(Control& child) const;
 
     std::vector<Control*> children_;
