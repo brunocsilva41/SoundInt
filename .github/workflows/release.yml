@@ -451,6 +451,25 @@ jobs:
           }
           $text = (($out -join "`n").Trim())
           if (-not [string]::IsNullOrWhiteSpace($text)) { $notes = $text }
+
+          # Rodape fixo: guia rapido + links uteis (o corpo vem do CHANGELOG).
+          $footer = @"
+
+---
+
+**Novo por aqui?** O passo a passo com prints anotados (setas apontando cada
+botão) está no [README — Como usar](https://github.com/brunocsilva41/SoundInt#como-usar).
+
+- Depois de instalar, procure o ícone do SoundInt na **bandeja** do Windows.
+- **Clique esquerdo** abre o mixer (saídas + apps tocando agora).
+- **Clique direito** abre o menu com as Configurações.
+- Para rotear um app, clique no chevron ao lado dele no mixer e escolha a
+  saída — a regra fica salva e vale na próxima vez que ele tocar.
+
+Encontrou um problema? [Abra uma issue](https://github.com/brunocsilva41/SoundInt/issues)
+anexando o log de `%LOCALAPPDATA%\SoundInt\logs`.
+"@
+          $notes = "$notes$footer"
           Set-Content -Path 'release-notes.md' -Value $notes -Encoding utf8
 
           # Recursivo: o instalador chega aninhado (pkg/installer/Output/...)
