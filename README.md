@@ -36,7 +36,9 @@ onde clicar.
 <img src="docs/images/como-usar/01-bandeja.png" alt="Bandeja do Windows com o ícone do SoundInt destacado por uma seta" width="640">
 
 O app não abre janela nenhuma no início — ele vive na **bandeja** (canto
-direito da barra de tarefas), ao lado do relógio. É ali que tudo acontece.
+direito da barra de tarefas), ao lado do relógio. No Windows 10/11 o ícone
+pode ficar entre os **ícones ocultos**: clique na divisa **^** da bandeja
+para vê-lo. É ali que tudo acontece.
 
 ### 2 · Clique esquerdo abre o mixer
 

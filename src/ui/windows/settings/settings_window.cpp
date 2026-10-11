@@ -128,6 +128,8 @@ public:
     // Entrega o resultado de re-registro de atalhos as paginas (nao-confia:
     // chamado por notifyHotkeysResult na thread da UI).
     void deliverHotkeysResult(bool ok);
+    // Abre a janela ja na pagina (modo de captura de telas).
+    void showPageAt(size_t index);
 
 protected:
     bool handleMessage(UINT msg, WPARAM w, LPARAM l, LRESULT& result) override;
@@ -303,6 +305,17 @@ void SettingsWindow::deliverHotkeysResult(bool ok)
         }
     }
     requestRender();
+}
+
+void SettingsWindow::showPageAt(size_t index)
+{
+    if (!ensureCreated()) {
+        return;
+    }
+    if (index < kPageCount) {
+        selectPage(index);
+    }
+    showCentered();
 }
 
 // ---------------------------------------------------------------------------
@@ -670,6 +683,11 @@ void show()
 void hide()
 {
     instance().hide();
+}
+
+void showPage(size_t index)
+{
+    instance().showPageAt(index);
 }
 
 bool isVisible()

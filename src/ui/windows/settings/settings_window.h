@@ -29,6 +29,9 @@ void init(SettingsHost host);
 
 // Abre centralizada na work area do monitor ativo (cria a janela sob demanda).
 void show();
+// Abre centralizada JA na pagina indicada (0=Geral..5=About). Aditivo ao
+// seam, usado pelo modo de captura de telas (--capture settings:rules).
+void showPage(size_t index);
 void hide();
 bool isVisible();
 void shutdown();

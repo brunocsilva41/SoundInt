@@ -24,9 +24,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
-# --- Paleta (alinhada ao accent do app) -------------------------------------
-$Accent   = [System.Drawing.Color]::FromArgb(255, 0, 103, 192)    # accent light
-$AccentDk = [System.Drawing.Color]::FromArgb(255, 76, 160, 255)   # accent dark
+# --- Paleta (accent do tema DARK do app — os prints sao dark) ------------------
+$Accent   = [System.Drawing.Color]::FromArgb(255, 76, 160, 255)
 $White    = [System.Drawing.Color]::White
 $Ink      = [System.Drawing.Color]::FromArgb(235, 26, 26, 26)     # chip de texto
 $ChipFg   = [System.Drawing.Color]::FromArgb(255, 243, 243, 243)

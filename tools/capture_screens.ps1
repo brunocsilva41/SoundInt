@@ -53,12 +53,13 @@ public static class WinCap
                 var cls = new StringBuilder(256);
                 GetClassName(h, cls, 256);
                 var t = sb.ToString();
+                // Janelas do SoundInt nascem sem titulo: casar por classe
+                // tambem (SoundIntSettingsWindow, SoundInt.ModalApp, ...).
                 if (titleContains.Length == 0 ||
                     (t.IndexOf(titleContains, StringComparison.OrdinalIgnoreCase) >= 0) ||
-                    cls.ToString().IndexOf(titleContains, StringComparison.OrdinalIgnoreCase) >= 0)
+                    (cls.ToString().IndexOf(titleContains, StringComparison.OrdinalIgnoreCase) >= 0))
                 {
-                    if (t.Length > 0 || cls.ToString() == "#32768")
-                        result.Add(h);
+                    result.Add(h);
                 }
             }
             return true;
@@ -93,7 +94,7 @@ if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out
 $i = 0
 foreach ($w in $wins) {
     $r = New-Object WinCap+RECT
-    [WinCap]::GetWindowRect($w, $r) | Out-Null
+    [WinCap]::GetWindowRect($w, [ref]$r) | Out-Null
     $wpx = $r.Right - $r.Left
     $hpx = $r.Bottom - $r.Top
     if ($wpx -le 0 -or $hpx -le 0) { continue }

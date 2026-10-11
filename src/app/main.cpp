@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 
+#include "app/capture.h"
 #include "app/hotkeys.h"
 #include "app/messages.h"
 #include "app/resource.h"
@@ -369,8 +370,12 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 }  // namespace
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
 {
+    // 0) modo de captura de telas (--capture <tela>): boot normal + abre a
+    // janela alvo ao final (prints do README; ver tools/capture_screens.ps1).
+    const std::wstring captureTarget = soundint::parseCaptureTarget(cmdLine);
+
     // 1) instancia unica: a segunda avisa a primeira e sai.
     soundint::SingleInstance single;
     if (!single.acquire()) {
@@ -474,6 +479,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     }
 
     SI_LOG_INFO("boot", L"SoundInt ativo");
+
+    // Modo de captura: abre a janela pedida com o boot ja completo (tray,
+    // audio e servicos ativos) para o script fotografar.
+    if (!captureTarget.empty()) {
+        soundint::openCaptureTarget(captureTarget, window);
+    }
 
     MSG msg{};
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
