@@ -26,32 +26,86 @@ sessões de áudio e **roteia a saída de som por aplicativo** — o Spotify no
 fone, o navegador nas caixas, o Discord no microfone — sem tocar no mixer do
 sistema.
 
+## Como usar
+
+Guia rápido em 6 passos. Os prints têm **setas e números** apontando exatamente
+onde clicar.
+
+### 1 · Depois de instalar, procure o SoundInt na bandeja
+
+<img src="docs/images/como-usar/01-bandeja.png" alt="Bandeja do Windows com o ícone do SoundInt destacado por uma seta" width="640">
+
+O app não abre janela nenhuma no início — ele vive na **bandeja** (canto
+direito da barra de tarefas), ao lado do relógio. No Windows 10/11 o ícone
+pode ficar entre os **ícones ocultos**: clique na divisa **^** da bandeja
+para vê-lo. É ali que tudo acontece.
+
+### 2 · Clique esquerdo abre o mixer
+
+<img src="docs/images/como-usar/02-mixer.png" alt="Mixer do SoundInt com setas apontando as saídas, os apps abertos e o botão de configurações" width="560">
+
+O mixer mostra, de cima para baixo: as **saídas** disponíveis (a saída
+padrão do sistema fica marcada), o que está **tocando agora**, os **apps
+abertos** com a saída roteada e o volume dos **sons do sistema**.
+
+### 3 · Roteie um app com um clique
+
+<img src="docs/images/como-usar/03-rotear-app.png" alt="Seta apontando o chevron de um app aberto no mixer, com a lista de saídas aberta" width="560">
+
+Ao lado de cada app aberto há um chevron (setinha para baixo). Clique nele,
+escolha a saída — pronto: a troca é imediata e **a regra fica salva**. Na
+próxima vez que esse app tocar, ele já vai para a saída escolhida. O ícone de
+engrenagem no rodapé abre as Configurações.
+
+### 4 · App novo começou a tocar? O SoundInt avisa
+
+<img src="docs/images/como-usar/04-modal-novo-app.png" alt="Modal de novo app com setas apontando a lista de saídas e a opção de lembrar a escolha" width="420">
+
+Quando um app sem regra começa a tocar (ou um dispositivo novo é conectado),
+um aviso sobe perto da bandeja para você escolher a saída na hora. Marque
+**"Lembrar escolha para este app"** e a regra é criada sozinha. Os avisos
+podem ser desligados em Configurações → Geral.
+
+### 5 · Regras, perfis e atalhos ficam nas Configurações
+
+<img src="docs/images/como-usar/05-config-regras.png" alt="Configurações na página Regras, com setas apontando o campo de processo, o seletor de saída, o botão Adicionar e o desfazer de remoção" width="560">
+
+Clique direito no ícone da bandeja → **Configurações**. A navegação é
+agrupada: **Comportamento** (Geral), **Roteamento** (Regras, Perfis) e
+**Sistema** (Atalhos, Atualizações, Sobre). Na página **Regras**, digite o
+processo (ex.: `spotify.exe`), escolha a saída no seletor e clique
+**Adicionar** — nada de IDs técnicos. Remoções têm **Desfazer** por 5
+segundos. **Perfis** agrupam várias rotas para trocar tudo de uma vez (ex.:
+"Home theater" × "Fone").
+
+### 6 · Mantenha o app atualizado
+
+<img src="docs/images/como-usar/06-config-atualizacoes.png" alt="Página de Atualizações com seta apontando o botão Verificar agora" width="560">
+
+Em Configurações → **Atualizações**, clique **Verificar agora**. Há também o
+canal **beta** (builds noturnas) para quem quer novidades antes.
+
+> **Não está roteando?** Veja o [aviso sobre a API interna](#aviso-api-não-documentada)
+> no fim do README — o Windows pode mudar a interface interna de roteamento.
+> O resto do app (mixer, volume, notificações) continua funcionando.
+
 ## Prints
 
-### Mixer — saídas, apps em execução e regras persistidas
+<details>
+<summary><b>Galeria — clique para ver as telas sem anotações</b></summary>
 
-<img src="docs/images/mixer-apps-abertos.png" alt="Mixer do SoundInt com a seção Apps abertos" width="360">
+| Tela | Print |
+|---|---|
+| Mixer com apps abertos | <img src="docs/images/mixer-apps-abertos.png" alt="Mixer com apps abertos" width="420"> |
+| Menu da bandeja (clique direito) | <img src="docs/images/tray-menu.png" alt="Menu da bandeja" width="260"> |
+| Modal de novo dispositivo | <img src="docs/images/modal-novo-dispositivo.png" alt="Modal de novo dispositivo" width="380"> |
+| Configurações — Geral | <img src="docs/images/settings-geral.png" alt="Configurações Geral" width="420"> |
+| Configurações — Regras | <img src="docs/images/settings-regras.png" alt="Configurações Regras" width="420"> |
+| Configurações — Perfis | <img src="docs/images/settings-perfis.png" alt="Configurações Perfis" width="420"> |
+| Configurações — Atalhos | <img src="docs/images/settings-atalhos.png" alt="Configurações Atalhos" width="420"> |
+| Configurações — Sobre | <img src="docs/images/settings-sobre.png" alt="Configurações Sobre" width="420"> |
 
-O mixer lista as saídas disponíveis, o que está tocando agora, os **apps
-abertos** com a saída roteada (clique no chevron re-roteia e persiste a
-regra) e o volume dos sons do sistema.
-
-### Configurações — regras por app com nome amigável do dispositivo
-
-<img src="docs/images/settings-regras.png" alt="Configurações - Regras por app" width="560">
-
-Cada `AppRule` mostra o processo e o destino em linguagem humana
-(`brave.exe → 3 - MGN-003-24S (AMD High Definition Audio)`), resolvido por
-ID de dispositivo; `Padrão do sistema` limpa a regra.
-
-### Configurações — geral e sobre
-
-<table>
-  <tr>
-    <td align="center"><img src="docs/images/settings-geral.png" alt="Configurações - Geral" width="360"><br><sub>Geral: avisos, inicialização, tema e idioma</sub></td>
-    <td align="center"><img src="docs/images/settings-sobre.png" alt="Configurações - Sobre" width="360"><br><sub>Sobre: versão, licença, logs e reporte de problemas</sub></td>
-  </tr>
-</table>
+</details>
 
 ## Funcionalidades
 
@@ -68,7 +122,7 @@ ID de dispositivo; `Padrão do sistema` limpa a regra.
   `IMMNotificationClient` (conexão, desconexão, default do sistema).
 - **Atualizador próprio** — checa as GitHub Releases, valida SHA256 e aplica
   a atualização (canais stable/beta).
-- **Perfícil de viver junto** — inicia com o Windows, fecha para a bandeja,
+- **Fácil de viver junto** — inicia com o Windows, fecha para a bandeja,
   logs rotativos em `%LOCALAPPDATA%\SoundInt`.
 
 ## Requisitos
@@ -187,6 +241,7 @@ src/ui        renderer Direct2D, controles, janelas (modais/mixer/menu/settings)
 src/update    atualizador via GitHub Releases
 src/app       shell do tray, wiring e políticas
 installer/    script Inno Setup (SoundInt.iss)
+tools/        scripts de captura e anotação de prints (PowerShell)
 .github/      workflows de CI, nightly e release + templates de issue/PR
 docs/         OWNERSHIP, arquitetura, processo de release, prints
 tests/        suítes doctest por módulo

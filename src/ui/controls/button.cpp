@@ -1,13 +1,12 @@
 #include "ui/controls/button.h"
 
+#include "ui/controls/metrics.h"
+
 namespace soundint::ui::controls {
 
-namespace {
-constexpr float kGlyphBox = 16.f;   // caixa do glifo de icone
-}  // namespace
-
 // ---------------------------------------------------------------------------
-// Desenho: fundo surface + borda + overlay de estado + glifo/texto centrados
+// Desenho: fundo surface + borda + overlay de estado + glifo/texto centrados.
+// Fontes, paddings, caixa de icone (16px) e raios escalam com scale_.
 // ---------------------------------------------------------------------------
 void Button::render(IRenderTarget& rt, const tokens::Palette& palette)
 {
@@ -15,16 +14,44 @@ void Button::render(IRenderTarget& rt, const tokens::Palette& palette)
         return;
     }
 
-    rt.fillRoundedRect(bounds_, tokens::kRadiusMd,
-                       enabled_ ? palette.surface : palette.surfaceAlt);
-    rt.strokeRoundedRect(bounds_, tokens::kRadiusMd, 1.f, palette.border);
-    renderOverlay(rt, palette);
+    // Fundo/borda por variante; desabilitado cai em surfaceAlt sempre.
+    Color fill = palette.surface;
+    Color border = palette.border;
+    Color fg = palette.textPrimary;
+    if (!enabled_) {
+        fill = palette.surfaceAlt;
+        border = palette.border;
+        fg = palette.textSecondary;
+    } else {
+        switch (variant_) {
+        case Variant::Primary:
+            fill = palette.accent;
+            border = palette.accent;
+            fg = palette.accentFg;
+            break;
+        case Variant::Danger:
+            fill = palette.danger;
+            border = palette.danger;
+            fg = palette.dangerFg;
+            break;
+        case Variant::Secondary:
+        default:
+            break;
+        }
+    }
 
-    const Color fg = enabled_ ? palette.textPrimary : palette.textSecondary;
+    const float radius = metrics::radius(tokens::kRadiusMd, scale_);
+    const float stroke = metrics::stroke(scale_);
+    const float padX = tokens::kSpace2 * scale_;
+    const float glyphBox = metrics::glyphBox(scale_);
+
+    rt.fillRoundedRect(bounds_, radius, fill);
+    rt.strokeRoundedRect(bounds_, radius, stroke, border);
+    renderOverlay(rt, palette);
 
     TextStyle icon;
     icon.fontFamily = tokens::kFontIcons;
-    icon.fontSize = tokens::kFontBody;
+    icon.fontSize = tokens::kFontBody * scale_;
     icon.weight = tokens::kWeightRegular;
     icon.color = fg;
     icon.align = TextStyle::Align::Center;
@@ -32,17 +59,18 @@ void Button::render(IRenderTarget& rt, const tokens::Palette& palette)
 
     TextStyle ts;
     ts.fontFamily = tokens::kFontUi;
-    ts.fontSize = tokens::kFontBody;
-    ts.weight = tokens::kWeightRegular;
+    ts.fontSize = tokens::kFontBody * scale_;
+    ts.weight = (variant_ == Variant::Secondary) ? tokens::kWeightRegular
+                                                  : tokens::kWeightSemibold;
     ts.color = fg;
     ts.align = TextStyle::Align::Center;
     ts.valign = TextStyle::VAlign::Middle;
 
     const Size textSize = text_.empty() ? Size{} : rt.measureText(text_, ts);
-    const float glyphW = glyph_.empty() ? 0.f : kGlyphBox;
-    const float gap = (glyphW > 0.f && textSize.w > 0.f) ? tokens::kSpace2 : 0.f;
+    const float glyphW = glyph_.empty() ? 0.f : glyphBox;
+    const float gap = (glyphW > 0.f && textSize.w > 0.f) ? padX : 0.f;
     const float groupW = glyphW + gap + textSize.w;
-    const float innerW = bounds_.w - tokens::kSpace2 * 2.f;
+    const float innerW = bounds_.w - padX * 2.f;
 
     float x = bounds_.x;
     float textW = textSize.w;
@@ -50,7 +78,7 @@ void Button::render(IRenderTarget& rt, const tokens::Palette& palette)
         x = bounds_.x + (bounds_.w - groupW) * 0.5f;
     } else {
         // Texto maior que o botao: alinha a esquerda e deixa o ellipsis cortar.
-        x = bounds_.x + tokens::kSpace2;
+        x = bounds_.x + padX;
         textW = innerW - glyphW - gap;
         if (textW < 0.f) {
             textW = 0.f;
@@ -58,7 +86,7 @@ void Button::render(IRenderTarget& rt, const tokens::Palette& palette)
     }
 
     if (glyphW > 0.f) {
-        const Rect gbox{x, bounds_.y, kGlyphBox, bounds_.h};
+        const Rect gbox{x, bounds_.y, glyphBox, bounds_.h};
         rt.drawGlyph(glyph_, gbox, icon);
     }
     if (textSize.w > 0.f) {
@@ -104,6 +132,10 @@ bool Button::onPointer(const PointerEvent& e)
         if (!captured_) {
             return false;
         }
+        // Up de outro botao nao conclui a interacao (segura a captura).
+        if (e.button != MouseButton::Left) {
+            return true;
+        }
         captured_ = false;
         pressed_ = false;
         const bool inside = bounds_.contains(e.x, e.y);
@@ -139,15 +171,20 @@ bool Button::onKey(const KeyEvent& e)
 
 void Button::click()
 {
+    // RESILIENCIA A UAF: o callback pode recriar a lista dona deste botao
+    // (ex.: rebuildRows dentro do setOnClick), destruindo o controle no meio
+    // da chamada. Callbacks NAO devem destruir o controle sincronamente —
+    // mas, por defesa, invalidamos ANTES de invocar e nao tocamos em `this`
+    // (nem em membros) depois que o callback roda.
+    invalidate();
     if (onClick_) {
         onClick_();
     }
-    invalidate();
 }
 
 Size Button::measure(float constraintWidth)
 {
-    return {constraintWidth, tokens::kControlHeight};
+    return {constraintWidth, tokens::kControlHeight * scale_};
 }
 
 }  // namespace soundint::ui::controls

@@ -158,7 +158,7 @@ jobs:
             tag       = $env:TAG
             url       = $url
             sha256    = $hash
-            sizeBytes = $size
+            size      = $size
             notes     = $notes
             prerelease = $true
           }

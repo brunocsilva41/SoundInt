@@ -29,9 +29,17 @@ void init(SettingsHost host);
 
 // Abre centralizada na work area do monitor ativo (cria a janela sob demanda).
 void show();
+// Abre centralizada JA na pagina indicada (0=Geral..5=About). Aditivo ao
+// seam, usado pelo modo de captura de telas (--capture settings:rules).
+void showPage(size_t index);
 void hide();
 bool isVisible();
 void shutdown();
+
+// Resultado do re-registro de atalhos apos edicao. O integrador chama apos
+// hotkeysChanged devolver, na thread da UI, com o bool de registerHotkeys;
+// false = conflito (aviso na pagina Atalhos). Janela fechada = no-op.
+void notifyHotkeysResult(bool ok);
 
 // HKCU\Software\Microsoft\Windows\CurrentVersion\Run "SoundInt" = caminho do
 // exe. Usado pela pagina Geral e pelo boot (Wave 3 chama applyStartup no start

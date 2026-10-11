@@ -100,7 +100,12 @@ Manifest parseManifest(std::string_view json, std::wstring* error)
             return Manifest{};
         }
 
+        // Campo "size" e o contrato; "sizeBytes" e aceito como fallback para
+        // manifests antigos (0.1.0 publicou com esse nome).
         auto sizeIt = root.find("size");
+        if (sizeIt == root.end() || !sizeIt->is_number_integer()) {
+            sizeIt = root.find("sizeBytes");
+        }
         if (sizeIt == root.end() || !sizeIt->is_number_integer()) {
             return fail(L"manifest: campo obrigatorio ausente/invalido: size");
         }

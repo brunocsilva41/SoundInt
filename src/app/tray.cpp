@@ -43,8 +43,12 @@ bool Tray::init(HWND hwnd)
     if (!nid.hIcon) {
         nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     }
-    lstrcpynW(nid.szTip, L"SoundInt", static_cast<int>(ARRAYSIZE(nid.szTip)));
+    lstrcpynW(nid.szTip, L"SoundInt — roteamento de áudio por app",
+              static_cast<int>(ARRAYSIZE(nid.szTip)));
 
+    // Explorer reiniciou e o icone antigo sumiu: tira o fantasma antes de
+    // re-adicionar (NIM_ADD com id duplicado falha silenciosamente).
+    Shell_NotifyIconW(NIM_DELETE, &nid);
     if (!Shell_NotifyIconW(NIM_ADD, &nid)) {
         SI_LOG_ERROR(kChannel, L"falha ao adicionar o icone da bandeja");
         hwnd_ = nullptr;
@@ -141,6 +145,28 @@ void Tray::showMenu(HWND hwnd)
 void Tray::showRequest(HWND hwnd, WPARAM tag)
 {
     PostMessageW(hwnd, WM_APP_SHOW_REQUEST, tag, 0);
+}
+
+UINT Tray::taskbarCreatedMessage()
+{
+    // Idempotente: RegisterWindowMessage devolve o mesmo id para o nome.
+    static const UINT id = RegisterWindowMessageW(L"TaskbarCreated");
+    return id;
+}
+
+void Tray::readd()
+{
+    // remove() zera hwnd_ — captura ANTES para re-inicializar com a mesma janela.
+    const HWND hwnd = hwnd_;
+    if (hwnd == nullptr) {
+        return;   // nunca inicializado
+    }
+    remove();
+    if (!init(hwnd)) {
+        SI_LOG_ERROR(kChannel, L"falha ao re-adicionar o icone da bandeja");
+        return;
+    }
+    SI_LOG_INFO(kChannel, L"bandeja recriada pelo Explorer — icone re-adicionado");
 }
 
 }  // namespace soundint

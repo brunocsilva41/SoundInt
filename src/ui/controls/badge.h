@@ -1,8 +1,9 @@
 // ============================================================================
 // Badge: texto curto em capsula (radius tokens::kRadiusSm).
-// Cor por Kind usando apenas a paleta recebida no render.
+// Cor por Kind usando apenas a paleta recebida no render; desabilitado cai
+// sempre no neutro (surfaceAlt + texto secundario).
 // Largura natural exige um IRenderTarget (measureText); medida de layout
-// devolve a altura kControlHeight e a largura atual dos bounds.
+// devolve a altura kControlHeight*scale() e a largura do constraint.
 // ============================================================================
 #pragma once
 
@@ -21,7 +22,7 @@ public:
     void setKind(Kind kind) { kind_ = kind; }
     Kind kind() const { return kind_; }
 
-    // Tamanho natural (testavel com um IRenderTarget mock).
+    // Tamanho natural (testavel com um IRenderTarget mock), escalado.
     Size naturalSize(IRenderTarget& rt) const;
 
     void render(IRenderTarget& rt, const tokens::Palette& palette) override;

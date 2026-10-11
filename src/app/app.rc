@@ -1,5 +1,7 @@
-// Recursos do executavel SoundInt: icone multi-tamanho + informacoes de versao
+﻿// Recursos do executavel SoundInt: icone multi-tamanho + informacoes de versao
 // (propriedades do arquivo no Explorer). O .ico fica ao lado deste arquivo.
+// Arquivo UTF-8 (BOM) + code_page 65001: permite acentos nos valores.
+#pragma code_page(65001)
 #include "resource.h"
 #include <winver.h>   // define VS_VERSION_INFO=1 (sem isto vira nome string)
 
@@ -19,7 +21,18 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", "SoundInt"
-            VALUE "FileDescription", "SoundInt - per-app audio routing"
+            VALUE "FileDescription", "SoundInt - per-app audio router"
+            VALUE "FileVersion", "0.1.0.0"
+            VALUE "InternalName", "SoundInt.exe"
+            VALUE "LegalCopyright", "Copyright (C) 2026 SoundInt. MIT License."
+            VALUE "OriginalFilename", "SoundInt.exe"
+            VALUE "ProductName", "SoundInt"
+            VALUE "ProductVersion", "0.1.0.0"
+        END
+        BLOCK "041604b0"
+        BEGIN
+            VALUE "CompanyName", "SoundInt"
+            VALUE "FileDescription", "Roteador de áudio por aplicativo"
             VALUE "FileVersion", "0.1.0.0"
             VALUE "InternalName", "SoundInt.exe"
             VALUE "LegalCopyright", "Copyright (C) 2026 SoundInt. MIT License."
@@ -30,6 +43,6 @@ BEGIN
     END
     BLOCK "VarFileInfo"
     BEGIN
-        VALUE "Translation", 0x409, 1200
+        VALUE "Translation", 0x409, 1200, 0x416, 1200
     END
 END

@@ -3,6 +3,8 @@
 // ============================================================================
 #include "ui/palette.h"
 
+#include <cwchar>
+
 namespace soundint::ui {
 
 namespace {
@@ -37,6 +39,29 @@ tokens::Palette resolvePalette(int theme)
     }
 }
 
+namespace {
+
+// Fator extra do modo de captura (SOUNDINT_CAPTURE_SCALE): multiplica a
+// escala para o app renderizar nItido em monitores 100% (equivalente a
+// fotografar num monitor HiDPI). Usado apenas pelo script de prints do
+// README; sem a variavel, fator = 1 (comportamento normal).
+float captureScaleFactor()
+{
+    static const float factor = []() {
+        wchar_t value[16]{};
+        const DWORD len =
+            GetEnvironmentVariableW(L"SOUNDINT_CAPTURE_SCALE", value, 16);
+        if (len == 0 || len >= 16) {
+            return 1.0f;
+        }
+        const float parsed = std::wcstof(value, nullptr);
+        return (parsed > 0.25f && parsed <= 4.0f) ? parsed : 1.0f;
+    }();
+    return factor;
+}
+
+}  // namespace
+
 float windowDpiScale(HWND hwnd)
 {
     if (hwnd == nullptr) {
@@ -46,7 +71,7 @@ float windowDpiScale(HWND hwnd)
     if (dpi == 0) {
         return 1.0f;
     }
-    return static_cast<float>(dpi) / 96.0f;
+    return (static_cast<float>(dpi) / 96.0f) * captureScaleFactor();
 }
 
 }  // namespace soundint::ui

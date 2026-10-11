@@ -1,31 +1,37 @@
 #include "ui/controls/toggle.h"
 
+#include "ui/controls/metrics.h"
+
 namespace soundint::ui::controls {
 
 namespace {
-// Dimensoes derivadas dos tokens: trilha 48x24, pino 16 (raio = kRadiusMd,
-// portanto um circulo perfeito).
+// Dimensoes LOGICAS derivadas dos tokens (multiplicadas por scale no uso):
+// trilha 48x24, pino 16 — raio kRadiusMd mantem o pino um circulo perfeito.
 constexpr float kTrackH = tokens::kControlHeight - tokens::kSpace1 * 2.f;
 constexpr float kTrackW = kTrackH * 2.f;
 constexpr float kKnobD = kTrackH - tokens::kSpace1 * 2.f;
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// Geometria pura
+// Geometria pura (trilha 48px logicos, proporcional ao fator DPI)
 // ---------------------------------------------------------------------------
-Rect Toggle::trackRect(const Rect& b)
+Rect Toggle::trackRect(const Rect& b, float scale)
 {
-    const float x = b.x + (b.w > kTrackW ? (b.w - kTrackW) * 0.5f : 0.f);
-    const float y = b.y + (b.h > kTrackH ? (b.h - kTrackH) * 0.5f : 0.f);
-    return {x, y, kTrackW, kTrackH};
+    const float trackH = kTrackH * scale;
+    const float trackW = kTrackW * scale;
+    const float x = b.x + (b.w > trackW ? (b.w - trackW) * 0.5f : 0.f);
+    const float y = b.y + (b.h > trackH ? (b.h - trackH) * 0.5f : 0.f);
+    return {x, y, trackW, trackH};
 }
 
-Rect Toggle::knobRect(const Rect& b, bool on)
+Rect Toggle::knobRect(const Rect& b, bool on, float scale)
 {
-    const Rect track = trackRect(b);
-    const float travel = track.w - kKnobD - tokens::kSpace1 * 2.f;
-    const float x = track.x + tokens::kSpace1 + (on ? travel : 0.f);
-    return {x, track.y + tokens::kSpace1, kKnobD, kKnobD};
+    const Rect track = trackRect(b, scale);
+    const float knobD = kKnobD * scale;
+    const float inset = tokens::kSpace1 * scale;
+    const float travel = track.w - knobD - inset * 2.f;
+    const float x = track.x + inset + (on ? travel : 0.f);
+    return {x, track.y + inset, knobD, knobD};
 }
 
 // ---------------------------------------------------------------------------
@@ -37,26 +43,29 @@ void Toggle::render(IRenderTarget& rt, const tokens::Palette& palette)
         return;
     }
 
-    const Rect track = trackRect(bounds_);
+    const float radius = metrics::radius(tokens::kRadiusMd, scale_);
+    const float stroke = metrics::stroke(scale_);
+    const Rect track = trackRect(bounds_, scale_);
+
     Color trackColor = palette.surfaceAlt;
     if (enabled_ && value_) {
         trackColor = palette.accent;
     }
-    rt.fillRoundedRect(track, tokens::kRadiusMd, trackColor);
-    rt.strokeRoundedRect(track, tokens::kRadiusMd, 1.f, palette.border);
+    rt.fillRoundedRect(track, radius, trackColor);
+    rt.strokeRoundedRect(track, radius, stroke, palette.border);
 
     if (enabled_) {
         if (pressed_) {
-            rt.fillRoundedRect(track, tokens::kRadiusMd, palette.pressed);
+            rt.fillRoundedRect(track, radius, palette.pressed);
         } else if (hovered_) {
-            rt.fillRoundedRect(track, tokens::kRadiusMd, palette.hover);
+            rt.fillRoundedRect(track, radius, palette.hover);
         }
     }
 
-    const Rect knob = knobRect(bounds_, value_);
-    rt.fillRoundedRect(knob, tokens::kRadiusMd,
+    const Rect knob = knobRect(bounds_, value_, scale_);
+    rt.fillRoundedRect(knob, radius,
                        enabled_ ? palette.surface : palette.surfaceAlt);
-    rt.strokeRoundedRect(knob, tokens::kRadiusMd, 1.f, palette.border);
+    rt.strokeRoundedRect(knob, radius, stroke, palette.border);
 
     renderFocus(rt, palette, track);
 }
@@ -96,6 +105,10 @@ bool Toggle::onPointer(const PointerEvent& e)
         if (!captured_) {
             return false;
         }
+        // Up de outro botao nao conclui a interacao (segura a captura).
+        if (e.button != MouseButton::Left) {
+            return true;
+        }
         captured_ = false;
         pressed_ = false;
         const bool inside = bounds_.contains(e.x, e.y);
@@ -132,15 +145,18 @@ bool Toggle::onKey(const KeyEvent& e)
 void Toggle::toggle()
 {
     value_ = !value_;
+    // RESILIENCIA A UAF: onChanged_ pode recriar a lista dona deste toggle
+    // (rebuild sincrono). Invalidamos ANTES e nao tocamos em `this` depois
+    // que o callback roda.
+    invalidate();
     if (onChanged_) {
         onChanged_(value_);
     }
-    invalidate();
 }
 
 Size Toggle::measure(float constraintWidth)
 {
-    return {constraintWidth, tokens::kControlHeight};
+    return {constraintWidth, tokens::kControlHeight * scale_};
 }
 
 }  // namespace soundint::ui::controls

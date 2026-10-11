@@ -45,8 +45,8 @@ bool isVisible();
 void shutdown();               // fecha a janela e desinscreve do bus
 
 // ---------------------------------------------------------------------------
-// Metricas do layout (px logicos). A LARGURA escala por dpiScale(); a altura
-// vem dos controles (tokens sem escala — mesmo contrato do Track E).
+// Metricas do layout (px logicos). O flyout aplica dpiScale() em TODAS as
+// metricas (largura, alturas, insets) — planLayout(scale) devolve px FISICOS.
 // ---------------------------------------------------------------------------
 namespace layout {
 constexpr float kPad = 12.f;         // margem interna da janela
@@ -90,8 +90,10 @@ struct LayoutPlan {
     float maxScroll = 0.f;       // conteudo - viewport (0 = nao rola)
 };
 
+// `scale` = dpiScale() do monitor: com 1.0 o plano fica em px logicos;
+// > 1.0 todas as saidas ficam em px FISICOS (janela/pronto para resizeClient).
 float contentHeightFor(const ContentSpec& spec);
-LayoutPlan planLayout(const ContentSpec& spec, float workHeight);
+LayoutPlan planLayout(const ContentSpec& spec, float workHeight, float scale = 1.f);
 
 // Ordena as sessoes: ativas primeiro, inativas depois e systemSounds por ultimo.
 std::vector<SessionInfo> orderSessions(const std::vector<SessionInfo>& sessions);

@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 
+#include "app/capture.h"
 #include "app/hotkeys.h"
 #include "app/messages.h"
 #include "app/resource.h"
@@ -226,8 +227,12 @@ void wireUi(AppShell& shell, HWND window, soundint::core::Store& config)
         };
     settingsHost.hotkeysChanged = [&shell, window]() {
         shell.hotkeys.unregister();
-        shell.hotkeys.registerHotkeys(window,
-                                       soundint::store().settings().hotkeys);
+        const bool ok = shell.hotkeys.registerHotkeys(
+            window, soundint::store().settings().hotkeys);
+        if (!ok) {
+            // Conflito de atalho global: avisa na pagina Atalhos (UI thread).
+            soundint::ui::settings::notifyHotkeysResult(false);
+        }
     };
     settingsHost.applyProfile = [&shell](const std::wstring& name) {
         for (const soundint::Profile& profile : soundint::store().profiles()) {
@@ -277,6 +282,10 @@ void wireUi(AppShell& shell, HWND window, soundint::core::Store& config)
 
 void shutdownShell()
 {
+    // Visibilidade de ciclo de vida: sem isto o log nao mostra NENHUMA
+    // evidencia de encerramento (impossivel diagnosticar "nao fecha").
+    SI_LOG_INFO("boot", L"SoundInt encerrando");
+
     // Nao postar wakeup em uma janela que esta sendo destruida.
     soundint::events().setWakeup({});
 
@@ -306,6 +315,15 @@ void shutdownShell()
 
 LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    // Explorer reiniciou: re-adiciona o icone da bandeja (sem isto o app
+    // ficaria "zumbi" — processo vivo, sem icone e sem menu Sair).
+    if (msg == soundint::Tray::taskbarCreatedMessage()) {
+        if (g_shell != nullptr) {
+            g_shell->tray.readd();
+        }
+        return 0;
+    }
+
     switch (msg) {
         case soundint::WM_APP_WAKEUP:
             soundint::events().pump();
@@ -353,6 +371,18 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             DestroyWindow(hwnd);
             return 0;
 
+        case WM_QUERYENDSESSION:
+            // Windows desligando/logoff: sempre pronto (sem dialogo).
+            return 1;
+
+        case WM_ENDSESSION:
+            // Fim de sessao confirmado: encaminha pelo caminho limpo (log,
+            // store, tray) em vez de deixar o Windows matar o processo.
+            if (wParam != 0) {
+                DestroyWindow(hwnd);
+            }
+            return 0;
+
         case WM_DESTROY:
             shutdownShell();
             return 0;
@@ -365,8 +395,12 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 }  // namespace
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR cmdLine, int)
 {
+    // 0) modo de captura de telas (--capture <tela>): boot normal + abre a
+    // janela alvo ao final (prints do README; ver tools/capture_screens.ps1).
+    const std::wstring captureTarget = soundint::parseCaptureTarget(cmdLine);
+
     // 1) instancia unica: a segunda avisa a primeira e sai.
     soundint::SingleInstance single;
     if (!single.acquire()) {
@@ -470,6 +504,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     }
 
     SI_LOG_INFO("boot", L"SoundInt ativo");
+
+    // Modo de captura: abre a janela pedida com o boot ja completo (tray,
+    // audio e servicos ativos) para o script fotografar.
+    if (!captureTarget.empty()) {
+        soundint::openCaptureTarget(captureTarget, window);
+    }
 
     MSG msg{};
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {

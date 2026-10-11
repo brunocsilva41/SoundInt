@@ -1,6 +1,9 @@
 // ============================================================================
 // Linha de lista: glifo (icone) + titulo + subtitulo opcional.
-// Pointer: Down captura; Up dentro -> clique. Altura tokens::kRowHeight.
+// Pointer: Down captura; Up dentro -> clique. Altura tokens::kRowHeight*scale.
+//
+// trailingInset: reserva de espaco a direita para conteudo pintado pelo
+// consumidor (ex.: check de saida padrao no mixer) — o texto para antes dela.
 // ============================================================================
 #pragma once
 
@@ -23,6 +26,11 @@ public:
     const std::wstring& subtitle() const { return subtitle_; }
     void setOnClick(ClickFn fn) { onClick_ = std::move(fn); }
 
+    // Reserva (px logicos) a direita: o texto para em
+    // right - kSpace2*scale() - trailingInset. Default 0 (sem reserva).
+    void setTrailingInset(float px) { trailingInset_ = px; }
+    float trailingInset() const { return trailingInset_; }
+
     void render(IRenderTarget& rt, const tokens::Palette& palette) override;
     bool onPointer(const PointerEvent& e) override;
     bool onKey(const KeyEvent& e) override;
@@ -34,6 +42,7 @@ private:
     std::wstring glyph_;
     std::wstring title_;
     std::wstring subtitle_;
+    float trailingInset_ = 0.f;
     ClickFn onClick_;
 };
 

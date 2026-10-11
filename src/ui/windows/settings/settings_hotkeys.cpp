@@ -1,8 +1,18 @@
 // ============================================================================
-// Pagina Atalhos (Track K): lista de bindings do Store, gravacao da proxima
+// Pagina Atalhos (U3): lista de bindings do Store, gravacao da proxima
 // combinacao (WM_KEYDOWN cru) e notificacao host().hotkeysChanged().
+//
+// - Hint de gravacao SOMENTE enquanto recordingId_ esta ativo (antes era
+//   desenhado sempre); fora da gravacao a mesma linha vira status
+//   transitorio (ex.: atalho desativado via Delete).
+// - Perfis mostram o NOME REAL ("Perfil: Home"), nao "Perfil 3" por indice.
+// - NENHUM callback destroi controles sincronamente (UAF): rebuilds sao
+//   adiados (rowsDirty_) para o proximo layout/render. Isso cobre o caso
+//   "mouse capturado no botao Gravar + tecla pressionada".
 // ============================================================================
 #include "ui/windows/settings/settings_page.h"
+
+#include "ui/windows/settings/settings_undo.h"
 
 #include "core/store.h"
 #include "ui/i18n.h"
@@ -16,6 +26,10 @@
 
 namespace soundint::ui::settings {
 namespace {
+
+// Larguras logicas (96 DPI) padronizadas com as demais paginas.
+constexpr float kRecordW = 110.f;
+constexpr float kCaptionW = 52.f;
 
 bool isModifierVk(UINT vk)
 {
@@ -129,6 +143,8 @@ std::wstring formatBinding(const soundint::HotkeyBinding& binding)
 }
 
 // Rotulo amigavel por id ("mixer", "cycleOutput", "profile:<n>").
+// Perfis resolvem o NOME REAL do perfil ("Perfil: Home"); indice numerico
+// so aparece como fallback quando o perfil nao existe mais.
 std::wstring labelForId(const std::wstring& id)
 {
     if (id == L"mixer") {
@@ -141,10 +157,28 @@ std::wstring labelForId(const std::wstring& id)
     if (id.rfind(kProfilePrefix, 0) == 0) {
         std::wstring out = tr(L"settings.hotkeys.profile");
         const std::wstring suffix = id.substr(8);
-        if (!suffix.empty()) {
-            out += L' ';
-            out += suffix;
+        if (suffix.empty()) {
+            return out;
         }
+        bool numeric = true;
+        for (const wchar_t c : suffix) {
+            if (c < L'0' || c > L'9') {
+                numeric = false;
+                break;
+            }
+        }
+        if (numeric) {
+            const int index = _wtoi(suffix.c_str());
+            const auto& profiles = core::Store::instance().profiles();
+            const size_t pos = static_cast<size_t>(index < 0 ? 0 : index);
+            if (pos < profiles.size() && !profiles[pos].name.empty()) {
+                out += L": ";
+                out += profiles[pos].name;
+                return out;
+            }
+        }
+        out += L' ';
+        out += suffix;   // perfil inexistente/invalido: mantem o indice
         return out;
     }
     return id;
@@ -179,8 +213,19 @@ protected:
 
     void onHide() override
     {
+        SettingsPage::onHide();   // base: fecha popups e solta o foco
         recordingId_.clear();
         requestRender();
+    }
+
+    // Conflito de re-registro (ex.: atalho ja usado por outro app): mostra na
+    // linha de status. Rota: main -> notifyHotkeysResult -> janela -> pagina.
+    void hotkeysResult(bool ok) override
+    {
+        if (!ok) {
+            status_.show(StatusKind::Danger, tr(L"settings.hotkeys.conflict"));
+            requestRender();
+        }
     }
 
     bool rawKeyImpl(UINT msg, WPARAM w) override
@@ -198,11 +243,13 @@ protected:
         }
         if (vk == VK_ESCAPE) {
             recordingId_.clear();
+            status_.show(StatusKind::Info, tr(L"settings.hotkeys.cancelled"));
             requestRender();
             return true;
         }
 
         auto& store = core::Store::instance();
+        bool unassigned = false;
         for (soundint::HotkeyBinding& binding : store.settings().hotkeys) {
             if (binding.id != recordingId_) {
                 continue;
@@ -210,6 +257,7 @@ protected:
             if (vk == VK_DELETE) {
                 binding.vk = 0;          // desativa o atalho
                 binding.modifiers = 0;
+                unassigned = true;
             } else {
                 binding.modifiers = currentModifiers();
                 binding.vk = vk;
@@ -218,7 +266,12 @@ protected:
         }
         recordingId_.clear();
         store.save();
-        syncImpl();
+        if (unassigned) {
+            status_.show(StatusKind::Info, tr(L"settings.hotkeys.unassigned"));
+        }
+        // Rebuild ADIADO: destruir o botao Gravar aqui, com o mouse capturado
+        // no clique anterior, seria UAF no proximo WM_MOUSE*.
+        rowsDirty_ = true;
         requestRender();
         if (host().hotkeysChanged) {
             host().hotkeysChanged();
@@ -235,13 +288,16 @@ private:
     std::vector<std::unique_ptr<HotkeyRow>> rows_;
     std::wstring recordingId_;
     std::wstring hint_;
+    PageStatus status_;
 
     std::vector<Rect> rowRects_;
     std::vector<Rect> labelRects_;
     std::vector<Rect> bindingRects_;
-    Rect hintRect_{};
+    std::vector<Rect> captionRects_;
+    Rect statusRect_{};
     Rect emptyRect_{};
     bool empty_ = false;
+    bool rowsDirty_ = false;
 };
 
 void HotkeysPage::rebuildRows()
@@ -260,7 +316,7 @@ void HotkeysPage::rebuildRows()
         row->enabled = std::make_unique<controls::Toggle>();
         row->enabled->setValue(binding.enabled);
         row->enabled->setAccessibleName(labelForId(binding.id));
-        row->enabled->setOnChanged([this, id = binding.id](bool value) {
+        row->enabled->setOnChanged([id = binding.id](bool value) {
             auto& s = core::Store::instance();
             for (soundint::HotkeyBinding& hk : s.settings().hotkeys) {
                 if (hk.id == id) {
@@ -275,9 +331,14 @@ void HotkeysPage::rebuildRows()
             }
         });
 
+        std::wstring recordName = tr(L"settings.hotkeys.record");
+        recordName += L": ";
+        recordName += labelForId(binding.id);
+
         row->record = std::make_unique<controls::Button>();
         row->record->setText(tr(L"settings.hotkeys.record"));
         row->record->setGlyph(tokens::kIconKeyboard);
+        row->record->setAccessibleName(recordName);
         row->record->setOnClick([this, id = binding.id]() {
             recordingId_ = id;
             requestRender();
@@ -295,48 +356,61 @@ void HotkeysPage::rebuildRows()
     }
 }
 
-void HotkeysPage::layoutImpl(const Rect& area, float scale)
+void HotkeysPage::layoutImpl(const Rect& area, float /*scale*/)
 {
-    (void)scale;
     const auto& hotkeys = core::Store::instance().settings().hotkeys;
-    if (rows_.size() != hotkeys.size()) {
-        rebuildRows();
+    // F3: rebuild adiado sob captura de mouse — segurar GRAVAR e apertar
+    // a tecla da combinacao marca rowsDirty_ (rawKeyImpl); reconstruir
+    // aqui destruiria o botao sob o mouse (UAF no Up). rowsDirty_ NAO e
+    // limpo quando adiado: o proximo layout sem captura reconstrói.
+    if (rowsDirty_ || rows_.size() != hotkeys.size()) {
+        if (!rebuildDeferred()) {
+            rebuildRows();
+            rowsDirty_ = false;
+        }
     }
 
     const float y0 = area.y - scrollY_;
     const float rowH = s(tokens::kRowHeight);
     const float controlH = s(32.f);
-    const float recordW = s(140.f);
-    const float toggleW = s(48.f);
+    const float recordW = s(kRecordW);
+    const float toggleW = s(48.f);   // largura padronizada
+    const float captionW = s(kCaptionW);
 
     float y = y0;
     empty_ = hotkeys.empty();
     rowRects_.clear();
     labelRects_.clear();
     bindingRects_.clear();
+    captionRects_.clear();
 
     if (empty_) {
         emptyRect_ = {area.x, y + s(8.f), area.w, s(32.f)};
         y = emptyRect_.y + emptyRect_.h;
     } else {
         y += s(4.f);
-        const float toggleX = area.x + area.w - toggleW - recordW - s(8.f);
         const float recordX = area.x + area.w - recordW;
+        const float toggleX = recordX - s(12.f) - toggleW;
+        const float captionX = toggleX - s(8.f) - captionW;
         for (size_t i = 0; i < rows_.size(); ++i) {
             rowRects_.push_back({area.x, y, area.w, rowH});
             labelRects_.push_back({area.x + s(12.f), y, s(170.f), rowH});
             bindingRects_.push_back({area.x + s(190.f), y,
-                                     toggleX - (area.x + s(190.f)) - s(8.f), rowH});
+                                      captionX - (area.x + s(190.f)) - s(8.f),
+                                      rowH});
+            captionRects_.push_back({captionX, y, captionW, rowH});
             rows_[i]->enabled->setBounds({toggleX, y + (rowH - controlH) * 0.5f,
                                           toggleW, controlH});
-            rows_[i]->record->setBounds({recordX, y + (rowH - controlH) * 0.5f, recordW,
-                                         controlH});
+            rows_[i]->record->setBounds({recordX, y + (rowH - controlH) * 0.5f,
+                                          recordW, controlH});
             y += rowH + s(4.f);
         }
     }
 
-    hintRect_ = {area.x, y + s(8.f), area.w, s(20.f)};
-    y = hintRect_.y + hintRect_.h;
+    // Linha reservada: hint de gravacao durante a captura, status transitorio
+    // fora dela (antes o hint era desenhado SEMPRE).
+    statusRect_ = {area.x, y + s(8.f), area.w, s(20.f)};
+    y += s(28.f);
     contentH_ = y - y0;
 }
 
@@ -365,11 +439,21 @@ void HotkeysPage::renderImpl(IRenderTarget& rt, const tokens::Palette& palette)
             drawText(rt, bindingRects_[i], binding, palette, tokens::kFontBody,
                      recording ? tokens::kWeightSemibold : tokens::kWeightRegular,
                      recording ? palette.accent : palette.textSecondary);
+            // Rotulo visivel do toggle da linha (antes havia so o icone mudo).
+            drawText(rt, captionRects_[i], tr(L"settings.hotkeys.active"), palette,
+                     tokens::kFontCaption, tokens::kWeightRegular,
+                     palette.textSecondary, TextStyle::Align::Right);
         }
     }
 
-    drawText(rt, hintRect_, hint_, palette, tokens::kFontCaption,
-             tokens::kWeightRegular, palette.textSecondary);
+    // Hint de gravacao SOMENTE durante a gravacao; caso contrario, status.
+    if (!recordingId_.empty()) {
+        drawText(rt, statusRect_, hint_, palette, tokens::kFontBody,
+                 tokens::kWeightRegular, palette.accent);
+    } else if (status_.active()) {
+        drawText(rt, statusRect_, status_.text(), palette, tokens::kFontBody,
+                 tokens::kWeightRegular, statusColor(status_.kind(), palette));
+    }
 }
 
 }  // namespace

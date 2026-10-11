@@ -7,6 +7,7 @@
 #include "ui/controls/controls.h"
 #include "ui/renderer.h"
 #include "ui/windows/settings/settings_window.h"
+#include "ui/windows/window_base.h"   // CursorShape (WM_SETCURSOR)
 
 #include <memory>
 #include <string>
@@ -39,7 +40,9 @@ public:
     const std::wstring& text() const { return text_; }
     void setPlaceholder(std::wstring placeholder) { placeholder_ = std::move(placeholder); }
     void setEditable(bool editable) { editable_ = editable; }
-    void setScale(float scale) { scale_ = scale; }
+    bool editable() const { return editable_; }
+    // Escala (DPI) vem de Control::setScale(), propagada a todos os controls_
+    // por SettingsPage::layout() — o campo nao guarda fator proprio.
     void append(wchar_t c);
     void eraseBack();
 
@@ -52,7 +55,6 @@ public:
 private:
     std::wstring text_;
     std::wstring placeholder_;
-    float scale_ = 1.f;
     bool editable_ = true;
 };
 
@@ -72,6 +74,12 @@ public:
     void syncFromStore() { syncImpl(); }
     void refresh();   // retranslate() + syncFromStore()
 
+    // F3: a janela marca true enquanto h captura de mouse ativa — os
+    // layoutImpl com linhas dinamicas NAO reconstruem sob captura
+    // (rebuildRows destruiria o controle capturado; UAF no Up). Corpo
+    // inline no header: o .cpp pertence a outro track.
+    void setRebuildDeferred(bool deferred) { rebuildDeferred_ = deferred; }
+
     // Layout/pintura --------------------------------------------------------
     void layout(const Rect& area, float scale);
     void render(IRenderTarget& rt, const tokens::Palette& palette);
@@ -84,11 +92,23 @@ public:
     bool rawKey(UINT msg, WPARAM w);
     // Cola texto no campo focado (Ctrl+V); true se havia campo editavel.
     bool paste(const std::wstring& text);
-    // Chamado quando a janela sai da pagina (ex.: cancela gravacao).
-    virtual void onHide() {}
+    // Cursor sob o ponto (WM_SETCURSOR da janela): Hand sobre interativos,
+    // Text sobre campos editaveis, Arrow no resto. Espelha pointer().
+    CursorShape cursorAt(float x, float y) const;
+    // Tab/Shift+Tab: move o foco de teclado pelos controls_ na ordem de
+    // layout (pulando invisiveis/desabilitados), desfocando o anterior.
+    // false = a pagina nao tem candidatos a foco.
+    bool cycleFocus(bool backward);
+    // Chamado quando a janela sai da pagina (ex.: cancela gravacao): a base
+    // fecha popups abertos e solta o foco. Sobrescritas devem chamar a base.
+    virtual void onHide();
 
     // Resultado do checkForUpdates (somente pagina Atualizacoes).
     virtual void updateResult(bool /*found*/, const std::wstring& /*info*/) {}
+
+    // Resultado do re-registro de atalhos apos edicao (integrador chama
+    // notifyHotkeysResult; false = conflito). Somente Atalhos consome.
+    virtual void hotkeysResult(bool /*ok*/) {}
 
 protected:
     // Implementacao por pagina ------------------------------------------------
@@ -102,6 +122,11 @@ protected:
     virtual bool rawKeyImpl(UINT, WPARAM) { return false; }
     // Altura total do conteudo (para scroll); padrao = nao rola.
     virtual float contentHeightImpl() const { return 0.f; }
+
+    // F3: true quando a janela adiou o rebuild (captura de mouse ativa).
+    // Paginas com linhas dinamicas consultam no layoutImpl antes de
+    // chamar rebuildRows().
+    bool rebuildDeferred() const { return rebuildDeferred_; }
 
     // Helpers de desenho (escalam por dpiScale) ------------------------------
     float s(float v) const { return v * scale_; }
@@ -119,8 +144,24 @@ protected:
     float scale_ = 1.f;
     float scrollY_ = 0.f;
     float contentH_ = 0.f;         // preenchido por layoutImpl
+    bool rebuildDeferred_ = false;  // F3: rebuild de linhas adiado (captura)
     std::vector<Control*> controls_;
     std::vector<TextField*> fields_;
+
+private:
+    // Infra compartilhada das paginas (nao usar direto nas paginas).
+    void applyScale();   // propaga setScale(scale_) a todos os controls_
+    controls::Dropdown* expandedDropdown() const;   // popup aberto (o do topo)
+    // Uniao bounds + popup: cobre paginas que expandem os bounds ao abrir e
+    // paginas que deixam o bounds so do campo.
+    Rect dropdownRegion(const controls::Dropdown& dropdown) const;
+    void renderScrollbar(IRenderTarget& rt, const tokens::Palette& palette) const;
+    // Define o foco de teclado (unico por pagina); desfoca os demais.
+    void focusControl(controls::InteractiveControl* target);
+    // Valida focused_ contra controls_ (rebuilds podem destruir controles).
+    controls::InteractiveControl* focusedControl();
+
+    controls::InteractiveControl* focused_ = nullptr;
 };
 
 // Fabricas (uma por arquivo de pagina).

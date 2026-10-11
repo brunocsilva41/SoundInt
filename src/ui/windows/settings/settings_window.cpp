@@ -28,9 +28,13 @@ constexpr float kNavW = 200.f;
 constexpr float kWindowW = 760.f;
 constexpr float kWindowH = 540.f;
 constexpr float kNavItemH = 36.f;
-constexpr float kNavGap = 4.f;
+constexpr float kNavGap = 4.f;           // entre itens do mesmo bloco
+constexpr float kNavCaptionH = 20.f;      // cabecalho do bloco
+constexpr float kNavCaptionGap = 4.f;    // cabecalho -> primeiro item
+constexpr float kNavBlockGap = 16.f;     // entre blocos
+constexpr float kNavPadX = 8.f;          // margem lateral dos itens
+constexpr float kNavTextIndent = 32.f;   // rotulo/caption deslocados do glifo
 constexpr float kCloseSize = 32.f;
-constexpr float kPad = 24.f;
 constexpr float kHeadingH = 24.f;
 
 constexpr wchar_t kClassName[] = L"SoundIntSettingsWindow";
@@ -61,6 +65,21 @@ constexpr NavSpec kNavSpecs[kPageCount] = {
     {L"settings.nav.updates", tokens::kIconDownload},
     {L"settings.nav.about", tokens::kIconInfo},
 };
+
+// Blocos da navegacao (a ordem das paginas nao muda): cabecalho caption
+// acima do primeiro item do bloco + gap entre blocos.
+struct NavGroupSpec {
+    const wchar_t* captionKey;
+    PageIndex first;
+    size_t count;
+};
+
+constexpr NavGroupSpec kNavGroups[] = {
+    {L"settings.nav.section.behavior", kGeneral, 1},   // Comportamento
+    {L"settings.nav.section.routing", kRules, 2},      // Roteamento
+    {L"settings.nav.section.system", kHotkeys, 3},     // Sistema
+};
+constexpr size_t kNavGroupCount = sizeof(kNavGroups) / sizeof(kNavGroups[0]);
 
 // Host injetado pelo integrador (endereco estavel; init() troca o conteudo).
 SettingsHost& hostRef()
@@ -106,6 +125,11 @@ public:
         layout();
         requestRender();
     }
+    // Entrega o resultado de re-registro de atalhos as paginas (nao-confia:
+    // chamado por notifyHotkeysResult na thread da UI).
+    void deliverHotkeysResult(bool ok);
+    // Abre a janela ja na pagina (modo de captura de telas).
+    void showPageAt(size_t index);
 
 protected:
     bool handleMessage(UINT msg, WPARAM w, LPARAM l, LRESULT& result) override;
@@ -114,6 +138,7 @@ protected:
     bool onPointer(const PointerEvent& e) override;
     bool onKey(const KeyEvent& e) override;
     bool onChar(wchar_t c) override;
+    CursorShape onQueryCursor(float x, float y) override;
 
 private:
     void createPages();
@@ -138,6 +163,7 @@ private:
     Rect headingRect_{};
     Rect pageArea_{};
     Rect navItems_[kPageCount];
+    Rect navCaptions_[kNavGroupCount];
 };
 
 SettingsWindow& instance()
@@ -190,6 +216,12 @@ void SettingsWindow::showCentered()
 {
     drainResults();
     refreshAll();
+
+    // Reabrir a janela recomeca limpo: sem popup aberto, sem foco residual
+    // e sem gravacao de atalho pendente (onHide reseta o transitorio).
+    if (SettingsPage* activePage = page()) {
+        activePage->onHide();
+    }
 
     const float scale = dpiScale();
     const int width = static_cast<int>(kWindowW * scale);
@@ -265,6 +297,27 @@ void SettingsWindow::drainResults()
     }
 }
 
+void SettingsWindow::deliverHotkeysResult(bool ok)
+{
+    for (auto& pagePtr : pages_) {
+        if (pagePtr) {
+            pagePtr->hotkeysResult(ok);
+        }
+    }
+    requestRender();
+}
+
+void SettingsWindow::showPageAt(size_t index)
+{
+    if (!ensureCreated()) {
+        return;
+    }
+    if (index < kPageCount) {
+        selectPage(index);
+    }
+    showCentered();
+}
+
 // ---------------------------------------------------------------------------
 // Geometria
 // ---------------------------------------------------------------------------
@@ -282,23 +335,46 @@ void SettingsWindow::layout()
                             closeSize, closeSize});
 
     navRect_ = {0.f, titleH, navW, client.h - titleH};
-    const float itemTop = titleH + s(12);
+
+    // Blocos com cabecalho: caption + itens, gap fixo entre blocos. O topo da
+    // nav comeca direto no primeiro cabecalho (sem zona morta de 12px).
     const float itemH = s(kNavItemH);
-    for (size_t i = 0; i < kPageCount; ++i) {
-        navItems_[i] = {s(8), itemTop + static_cast<float>(i) * (itemH + s(kNavGap)),
-                        navW - s(16), itemH};
+    const float itemX = s(kNavPadX);
+    const float captionH = s(kNavCaptionH);
+    float navY = navRect_.y + s(tokens::kWindowMargin);
+    for (size_t g = 0; g < kNavGroupCount; ++g) {
+        navCaptions_[g] = {itemX + s(kNavTextIndent), navY,
+                           navW - itemX * 2.f - s(kNavTextIndent), captionH};
+        navY += captionH + s(kNavCaptionGap);
+        for (size_t i = 0; i < kNavGroups[g].count; ++i) {
+            navItems_[kNavGroups[g].first + i] = {itemX, navY, navW - itemX * 2.f,
+                                                 itemH};
+            navY += itemH;
+            if (i + 1 < kNavGroups[g].count) {
+                navY += s(kNavGap);
+            }
+        }
+        navY += s(kNavBlockGap);
     }
 
+    // Margens do conteudo unificadas no grid 4px (kWindowMargin = 16).
+    const float margin = s(tokens::kWindowMargin);
     contentRect_ = {navW, titleH, client.w - navW, client.h - titleH};
-    headingRect_ = {contentRect_.x + s(kPad), contentRect_.y + s(16),
-                    contentRect_.w - s(kPad) * 2.f, s(kHeadingH)};
+    headingRect_ = {contentRect_.x + margin, contentRect_.y + margin,
+                    contentRect_.w - margin * 2.f, s(kHeadingH)};
     const float pageY = headingRect_.y + headingRect_.h + s(8);
-    pageArea_ = {contentRect_.x + s(kPad), pageY, contentRect_.w - s(kPad) * 2.f,
-                 contentRect_.y + contentRect_.h - pageY - s(16)};
+    pageArea_ = {contentRect_.x + margin, pageY, contentRect_.w - margin * 2.f,
+                 contentRect_.y + contentRect_.h - pageY - margin};
 
     SettingsPage* activePage = page();
     if (activePage != nullptr) {
+        // F3: com captura de mouse ativa, adia o rebuildRows das paginas —
+        // reconstruir destruiria o controle capturado (UAF no Up; ex.:
+        // segurar GRAVAR e apertar a tecla da combinacao). rowsDirty_ fica
+        // preservado: o proximo layout sem captura reconstrói.
+        activePage->setRebuildDeferred(capture_ != nullptr);
         activePage->layout(pageArea_, scale_);
+        activePage->setRebuildDeferred(false);
     }
 }
 
@@ -393,6 +469,24 @@ bool SettingsWindow::pasteToField()
 // ---------------------------------------------------------------------------
 // Entrada
 // ---------------------------------------------------------------------------
+// Cursor (WM_SETCURSOR): mao sobre nav/fechar/interativos, IBeam sobre campos
+// de texto, seta no resto. Espelha o hit-test de onPointer.
+// ---------------------------------------------------------------------------
+CursorShape SettingsWindow::onQueryCursor(float x, float y)
+{
+    if (closeButton_.bounds().contains(x, y)) {
+        return CursorShape::Hand;
+    }
+    if (navRect_.contains(x, y)) {
+        return navHit(x, y) < kPageCount ? CursorShape::Hand : CursorShape::Arrow;
+    }
+    if (SettingsPage* activePage = page()) {
+        return activePage->cursorAt(x, y);
+    }
+    return CursorShape::Arrow;
+}
+
+// ---------------------------------------------------------------------------
 bool SettingsWindow::onPointer(const PointerEvent& e)
 {
     if (e.kind == PointerKind::Down) {
@@ -400,11 +494,20 @@ bool SettingsWindow::onPointer(const PointerEvent& e)
         layout();
     }
 
-    // Rota do controle capturado ate o Up/Leave.
-    if (capture_ != nullptr && e.kind != PointerKind::Down &&
-        e.kind != PointerKind::Wheel) {
+    // Rota do controle capturado ate o Up/Leave. Wheel tambem e do
+    // capturado (ex.: ajusta o slider sob o cursor sem rolar a pagina
+    // por baixo) e NAO solta a captura — espelha modal_common.cpp:574-576.
+    if (capture_ != nullptr && e.kind != PointerKind::Down) {
         Control* target = capture_;
-        if (e.kind != PointerKind::Move && e.kind != PointerKind::Leave) {
+        // Contrapartida do filtro dos controles (Track E/AG-7): Up de outro
+        // botao nao conclui interacao — mantem o roteamento para nao deixar
+        // captured_ fantasma no controle (overlay/click presos).
+        if (e.kind == PointerKind::Up && e.button != MouseButton::Left) {
+            target->onPointer(e);
+            return true;
+        }
+        if (e.kind != PointerKind::Move && e.kind != PointerKind::Leave &&
+            e.kind != PointerKind::Wheel) {
             capture_ = nullptr;
             releaseMouse();
         }
@@ -455,6 +558,11 @@ bool SettingsWindow::onPointer(const PointerEvent& e)
 bool SettingsWindow::onKey(const KeyEvent& e)
 {
     SettingsPage* activePage = page();
+    // Tab/Shift+Tab: navegacao por teclado dentro da pagina atual.
+    if (activePage != nullptr && e.down && e.key == Key::Tab &&
+        activePage->cycleFocus(e.shift)) {
+        return true;
+    }
     if (activePage != nullptr && activePage->key(e)) {
         return true;
     }
@@ -498,6 +606,18 @@ void SettingsWindow::onRender(IRenderTarget& rt, const Rect& client)
     rt.fillRoundedRect(navRect_, 0.f, p.surfaceAlt);
     rt.drawLine(navRect_.x + navRect_.w, navRect_.y, navRect_.x + navRect_.w,
                 navRect_.y + navRect_.h, 1.f, p.border);
+
+    // Cabecalhos dos blocos (caption semibold, cor secundaria).
+    TextStyle caption;
+    caption.fontFamily = tokens::kFontUi;
+    caption.fontSize = tokens::kFontCaption * scale_;
+    caption.weight = tokens::kWeightSemibold;
+    caption.color = p.textSecondary;
+    caption.align = TextStyle::Align::Left;
+    caption.valign = TextStyle::VAlign::Middle;
+    for (size_t g = 0; g < kNavGroupCount; ++g) {
+        rt.drawText(tr(kNavGroups[g].captionKey), navCaptions_[g], caption);
+    }
 
     for (size_t i = 0; i < kPageCount; ++i) {
         const Rect item = navItems_[i];
@@ -543,7 +663,9 @@ void SettingsWindow::onRender(IRenderTarget& rt, const Rect& client)
         heading.color = p.textPrimary;
         heading.align = TextStyle::Align::Left;
         heading.valign = TextStyle::VAlign::Middle;
-        rt.drawText(tr(activePage->titleKey()), headingRect_, heading);
+        // Consistencia nav <-> heading: o titulo usa a MESMA chave do item de
+        // navegacao selecionado (antes: "Regras" na nav vs "Regras por app").
+        rt.drawText(tr(kNavSpecs[selected_].key), headingRect_, heading);
         activePage->render(rt, p);
     }
     rt.popClip();
@@ -578,6 +700,11 @@ void hide()
     instance().hide();
 }
 
+void showPage(size_t index)
+{
+    instance().showPageAt(index);
+}
+
 bool isVisible()
 {
     return instance().isVisible();
@@ -606,6 +733,17 @@ SettingsHost& host()
 void notifyLanguageChanged()
 {
     instance().refreshAndLayout();
+}
+
+void notifyHotkeysResult(bool ok)
+{
+    // Chamado pelo integrador na thread da UI (dentro de hotkeysChanged).
+    // Janela fechada/nao criada: nada a avisar; sucesso: aviso desnecessario.
+    SettingsWindow& window = instance();
+    if (ok || !window.valid()) {
+        return;
+    }
+    window.deliverHotkeysResult(ok);
 }
 
 // ---------------------------------------------------------------------------

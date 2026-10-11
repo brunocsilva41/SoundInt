@@ -22,11 +22,13 @@ namespace {
 
 constexpr wchar_t kClassName[] = L"SoundIntMixerFlyout";
 constexpr DWORD kSettleMs = 250;    // ignora perda de foco imediata ao mostrar
+constexpr DWORD kTrayGuardMs = 250; // F5: guarda do toggle apos hide por foco
 constexpr float kIconBox = 20.f;    // caixa do icone da linha
 constexpr float kBtnSize = 32.f;    // botao-glyph (mute/rota/config)
 
 // ---------------------------------------------------------------------------
 // GlyphButton — botao apenas de glifo, com cor por tom (Normal/Danger/Accent).
+// Aceita um "hotspot" maior que a caixa visual (alvo de clique generoso).
 // ---------------------------------------------------------------------------
 class GlyphButton final : public controls::InteractiveControl {
 public:
@@ -37,10 +39,17 @@ public:
     void setGlyph(std::wstring glyph) { glyph_ = std::move(glyph); }
     void setTone(Tone tone) { tone_ = tone; }
     void setOnClick(ClickFn fn) { onClick_ = std::move(fn); }
+    // Area de hit/hover: bounds_ quando vazia; senao a hotspot (px fisicos).
+    void setHotspot(Rect hotspot) { hotspot_ = hotspot; }
+
+    bool containsPoint(float x, float y) const
+    {
+        return (hotspot_.w > 0.f ? hotspot_ : bounds_).contains(x, y);
+    }
 
     Size measure(float constraintWidth) override
     {
-        return {constraintWidth, tokens::kControlHeight};
+        return {constraintWidth, tokens::kControlHeight * scale()};
     }
 
     void render(IRenderTarget& rt, const tokens::Palette& palette) override
@@ -48,9 +57,11 @@ public:
         if (!visible_) {
             return;
         }
-        rt.fillRoundedRect(bounds_, tokens::kRadiusMd,
+        const float radius = tokens::kRadiusMd * scale();
+        const float strokeW = (scale() >= 2.f) ? 2.f : 1.f;
+        rt.fillRoundedRect(bounds_, radius,
                            enabled_ ? palette.surface : palette.surfaceAlt);
-        rt.strokeRoundedRect(bounds_, tokens::kRadiusMd, 1.f, palette.border);
+        rt.strokeRoundedRect(bounds_, radius, strokeW, palette.border);
         renderOverlay(rt, palette);
 
         Color fg = palette.textSecondary;
@@ -64,7 +75,7 @@ public:
 
         TextStyle ts;
         ts.fontFamily = tokens::kFontIcons;
-        ts.fontSize = tokens::kFontBody;
+        ts.fontSize = tokens::kFontBody * scale();
         ts.weight = tokens::kWeightRegular;
         ts.color = fg;
         ts.align = TextStyle::Align::Center;
@@ -81,7 +92,7 @@ public:
         switch (e.kind) {
             case PointerKind::Down:
                 if (!enabled_ || e.button != MouseButton::Left ||
-                    !bounds_.contains(e.x, e.y)) {
+                    !containsPoint(e.x, e.y)) {
                     return false;
                 }
                 captured_ = true;
@@ -92,11 +103,11 @@ public:
 
             case PointerKind::Move:
                 if (captured_) {
-                    pressed_ = bounds_.contains(e.x, e.y);
+                    pressed_ = containsPoint(e.x, e.y);
                     invalidate();
                     return true;
                 }
-                if (updateHover(e.x, e.y)) {
+                if (updateHoverHotspot(e.x, e.y)) {
                     invalidate();
                 }
                 return hovered_;
@@ -105,9 +116,14 @@ public:
                 if (!captured_) {
                     return false;
                 }
+                // Up de outro botao nao dispara click (segura a captura —
+                // mesmo filtro dos controles do Track E).
+                if (e.button != MouseButton::Left) {
+                    return true;
+                }
                 captured_ = false;
                 pressed_ = false;
-                const bool inside = bounds_.contains(e.x, e.y);
+                const bool inside = containsPoint(e.x, e.y);
                 invalidate();
                 if (inside && enabled_ && onClick_) {
                     onClick_();
@@ -142,25 +158,39 @@ public:
     }
 
 private:
+    // Hover sensivel a hotspot (updateHover da base so conhece bounds_).
+    bool updateHoverHotspot(float x, float y)
+    {
+        const bool inside = containsPoint(x, y);
+        if (inside == hovered_) {
+            return false;
+        }
+        hovered_ = inside;
+        return true;
+    }
+
     std::wstring glyph_;
     Tone tone_ = Tone::Normal;
     ClickFn onClick_;
+    Rect hotspot_{};
 };
 
 // ---------------------------------------------------------------------------
-// SectionLabel — capsula de secao ou rotulo centralizado de estado vazio.
+// SectionLabel — capsula de secao ou rotulo centralizado de estado vazio
+// (titulo + dica de proximo passo em duas linhas).
 // ---------------------------------------------------------------------------
 class SectionLabel final : public Control {
 public:
     enum class Kind : uint8_t { Section, Empty };
 
     void setText(std::wstring text) { text_ = std::move(text); }
+    void setHint(std::wstring hint) { hint_ = std::move(hint); }
     void setKind(Kind kind) { kind_ = kind; }
 
     Size measure(float constraintWidth) override
     {
         const float h = (kind_ == Kind::Section) ? layout::kSectionH : layout::kEmptyH;
-        return {constraintWidth, h};
+        return {constraintWidth, h * scale()};
     }
 
     void render(IRenderTarget& rt, const tokens::Palette& palette) override
@@ -168,30 +198,39 @@ public:
         if (!visible_) {
             return;
         }
+        const float s = scale();
         TextStyle ts;
         ts.fontFamily = tokens::kFontUi;
         ts.align = TextStyle::Align::Left;
         ts.valign = TextStyle::VAlign::Middle;
 
         if (kind_ == Kind::Section) {
-            rt.fillRoundedRect(bounds_, tokens::kRadiusSm, palette.surfaceAlt);
-            ts.fontSize = tokens::kFontCaption;
+            rt.fillRoundedRect(bounds_, tokens::kRadiusSm * s, palette.surfaceAlt);
+            ts.fontSize = tokens::kFontCaption * s;
             ts.weight = tokens::kWeightSemibold;
             ts.color = palette.textSecondary;
-            const Rect box{bounds_.x + tokens::kSpace2, bounds_.y,
-                           bounds_.w - tokens::kSpace2 * 2.f, bounds_.h};
+            const Rect box{bounds_.x + tokens::kSpace2 * s, bounds_.y,
+                           bounds_.w - tokens::kSpace2 * s * 2.f, bounds_.h};
             rt.drawText(text_, box, ts);
         } else {
-            ts.fontSize = tokens::kFontBody;
+            // Estado vazio: rotulo na metade de cima, dica na de baixo.
+            const float halfH = bounds_.h * 0.5f;
+            ts.fontSize = tokens::kFontBody * s;
             ts.weight = tokens::kWeightRegular;
             ts.color = palette.textSecondary;
             ts.align = TextStyle::Align::Center;
-            rt.drawText(text_, bounds_, ts);
+            rt.drawText(text_, {bounds_.x, bounds_.y, bounds_.w, halfH}, ts);
+            if (!hint_.empty()) {
+                ts.fontSize = tokens::kFontCaption * s;
+                rt.drawText(hint_, {bounds_.x, bounds_.y + halfH, bounds_.w, halfH},
+                            ts);
+            }
         }
     }
 
 private:
     std::wstring text_;
+    std::wstring hint_;
     Kind kind_ = Kind::Section;
 };
 
@@ -202,7 +241,7 @@ class Divider final : public Control {
 public:
     Size measure(float constraintWidth) override
     {
-        return {constraintWidth, layout::kDividerH};
+        return {constraintWidth, layout::kDividerH * scale()};
     }
 
     void render(IRenderTarget& rt, const tokens::Palette& palette) override
@@ -224,20 +263,22 @@ public:
 
     void render(IRenderTarget& rt, const tokens::Palette& palette) override
     {
-        controls::ListRow::render(rt, palette);
+        controls::ListRow::render(rt, palette);   // fundo/hover/glifo/texto
         if (!isDefault) {
             return;
         }
+        const float s = scale();
+        const float box = kIconBox * s;
         TextStyle ts;
         ts.fontFamily = tokens::kFontIcons;
-        ts.fontSize = tokens::kFontBody;
+        ts.fontSize = tokens::kFontBody * s;
         ts.weight = tokens::kWeightRegular;
         ts.color = palette.accent;
         ts.align = TextStyle::Align::Center;
         ts.valign = TextStyle::VAlign::Middle;
-        const Rect box{bounds_.x + bounds_.w - tokens::kSpace2 - kIconBox, bounds_.y,
-                       kIconBox, bounds_.h};
-        rt.drawGlyph(tokens::kIconCheck, box, ts);
+        const Rect rect{bounds_.x + bounds_.w - tokens::kSpace2 * s - box, bounds_.y,
+                        box, bounds_.h};
+        rt.drawGlyph(tokens::kIconCheck, rect, ts);
     }
 };
 
@@ -293,6 +334,7 @@ public:
         });
 
         routeBtn_.setGlyph(tokens::kIconChevronDown);
+        routeBtn_.setAccessibleName(tr(L"mixer.route"));
         routeBtn_.setOnClick([this] { route_.setExpanded(!route_.expanded()); });
 
         slider_.setValue(session_.volume);
@@ -325,7 +367,7 @@ public:
         if (mute_.bounds().contains(x, y)) {
             return &mute_;
         }
-        if (routingEnabled_ && routeBtn_.bounds().contains(x, y)) {
+        if (routingEnabled_ && routeBtn_.containsPoint(x, y)) {
             return &routeBtn_;
         }
         if (slider_.bounds().contains(x, y)) {
@@ -346,12 +388,23 @@ public:
         }
     }
 
+    // Control::setScale nao e virtual: propaga a escala para os filhos.
+    void applyScale(float scale)
+    {
+        slider_.setScale(scale);
+        mute_.setScale(scale);
+        routeBtn_.setScale(scale);
+        route_.setScale(scale);
+    }
+
     Size measure(float constraintWidth) override
     {
-        float height = layout::kAppRowH;
+        const float s = scale();
+        float height = layout::kAppRowH * s;
         if (routingEnabled_ && route_.expanded()) {
             const float items = static_cast<float>(route_.items().size());
-            height += layout::kGap * 2.f + tokens::kControlHeight * (1.f + items);
+            height += tokens::kSpace1 * s * 2.f +
+                      tokens::kControlHeight * s * (1.f + items);
         }
         return {constraintWidth, height};
     }
@@ -362,15 +415,28 @@ public:
             return;
         }
         layoutChildren();
-        rt.fillRoundedRect(bounds_, tokens::kRadiusMd, palette.surface);
+        const float s = scale();
+        const float radius = tokens::kRadiusMd * s;
 
-        const float iconY = bounds_.y + (layout::kRowOutH - kIconBox) * 0.5f;
-        const Rect iconBox{bounds_.x + tokens::kSpace2, iconY, kIconBox, kIconBox};
+        rt.fillRoundedRect(bounds_, radius, palette.surface);
+        if (hoveredRow_) {
+            // Hover de linha (mesma tecnica do overlay do Track E): por cima
+            // do fundo, por baixo do conteudo — antes a linha era fixa.
+            rt.fillRoundedRect(bounds_, radius, palette.hover);
+        }
+        // Chevron em accent enquanto o dropdown esta aberto (estado visivel).
+        routeBtn_.setTone(route_.expanded() ? GlyphButton::Tone::Accent
+                                            : GlyphButton::Tone::Normal);
+
+        const float rowH = layout::kRowOutH * s;
+        const float iconY = bounds_.y + (rowH - kIconBox * s) * 0.5f;
+        const Rect iconBox{bounds_.x + tokens::kSpace2 * s, iconY, kIconBox * s,
+                           kIconBox * s};
         if (iconGlyph_.empty()) {
-            rt.fillRoundedRect(iconBox, tokens::kRadiusSm, palette.surfaceAlt);
+            rt.fillRoundedRect(iconBox, tokens::kRadiusSm * s, palette.surfaceAlt);
             TextStyle initial;
             initial.fontFamily = tokens::kFontUi;
-            initial.fontSize = tokens::kFontCaption;
+            initial.fontSize = tokens::kFontCaption * s;
             initial.weight = tokens::kWeightSemibold;
             initial.color = palette.accent;
             initial.align = TextStyle::Align::Center;
@@ -379,7 +445,7 @@ public:
         } else {
             TextStyle glyph;
             glyph.fontFamily = tokens::kFontIcons;
-            glyph.fontSize = tokens::kFontBody;
+            glyph.fontSize = tokens::kFontBody * s;
             glyph.weight = tokens::kWeightRegular;
             glyph.color = palette.textSecondary;
             glyph.align = TextStyle::Align::Center;
@@ -387,13 +453,13 @@ public:
             rt.drawGlyph(iconGlyph_, iconBox, glyph);
         }
 
-        const float textX = iconBox.x + iconBox.w + tokens::kSpace2;
-        const float textW = mute_.bounds().x - tokens::kSpace1 - textX;
-        const float halfH = layout::kRowOutH * 0.5f;
+        const float textX = iconBox.x + iconBox.w + tokens::kSpace2 * s;
+        const float textW = mute_.bounds().x - tokens::kSpace1 * s - textX;
+        const float halfH = rowH * 0.5f;
 
         TextStyle title;
         title.fontFamily = tokens::kFontUi;
-        title.fontSize = tokens::kFontBody;
+        title.fontSize = tokens::kFontBody * s;
         title.weight = tokens::kWeightSemibold;
         title.color = palette.textPrimary;
         title.align = TextStyle::Align::Left;
@@ -401,7 +467,7 @@ public:
 
         if (subtitle_.empty()) {
             const Rect box{textX, bounds_.y, textW > 0.f ? textW : 0.f,
-                           layout::kRowOutH};
+                            rowH};
             rt.drawText(session_.displayName, box, title);
         } else {
             const Rect tbox{textX, bounds_.y, textW > 0.f ? textW : 0.f, halfH};
@@ -409,12 +475,13 @@ public:
 
             TextStyle sub;
             sub.fontFamily = tokens::kFontUi;
-            sub.fontSize = tokens::kFontCaption;
+            sub.fontSize = tokens::kFontCaption * s;
             sub.weight = tokens::kWeightRegular;
             sub.color = palette.textSecondary;
             sub.align = TextStyle::Align::Left;
             sub.valign = TextStyle::VAlign::Middle;
-            const Rect sbox{textX, bounds_.y + halfH, textW > 0.f ? textW : 0.f, halfH};
+            const Rect sbox{textX, bounds_.y + halfH, textW > 0.f ? textW : 0.f,
+                            halfH};
             rt.drawText(subtitle_, sbox, sub);
         }
 
@@ -433,6 +500,7 @@ public:
         if (!visible_) {
             return false;
         }
+        updateRowHover(e);
         layoutChildren();
 
         const bool wasExpanded = route_.expanded();
@@ -485,27 +553,50 @@ public:
     }
 
 private:
+    // Hover da LINHA (o Control base nao rastreia): Move dentro dos bounds,
+    // Leave limpa. Down/Up/Wheel nao mudam o estado.
+    void updateRowHover(const PointerEvent& e)
+    {
+        bool inside = false;
+        if (e.kind == PointerKind::Move) {
+            inside = bounds_.contains(e.x, e.y);
+        } else if (e.kind != PointerKind::Leave) {
+            return;
+        }
+        if (inside != hoveredRow_) {
+            hoveredRow_ = inside;
+            invalidate();
+        }
+    }
+
     void layoutChildren()
     {
+        const float s = scale();
         const float x = bounds_.x;
         const float y = bounds_.y;
         const float w = bounds_.w;
-        const float right = x + w - tokens::kSpace2;
-        const float btnY = y + (layout::kRowOutH - kBtnSize) * 0.5f;
+        const float right = x + w - tokens::kSpace2 * s;
+        const float btnSize = kBtnSize * s;
+        const float rowH = layout::kRowOutH * s;
+        const float btnY = y + (rowH - btnSize) * 0.5f;
 
         float muteRight = right;
         if (routingEnabled_) {
-            routeBtn_.setBounds({right - kBtnSize, btnY, kBtnSize, kBtnSize});
-            muteRight = right - kBtnSize - tokens::kSpace1;
+            routeBtn_.setBounds({right - btnSize, btnY, btnSize, btnSize});
+            // Hotspot na altura total da linha de titulo: alvo generoso para
+            // o chevron de roteamento (a caixa visual continua kBtnSize).
+            routeBtn_.setHotspot({right - btnSize, y, btnSize, rowH});
+            muteRight = right - btnSize - tokens::kSpace1 * s;
         }
-        mute_.setBounds({muteRight - kBtnSize, btnY, kBtnSize, kBtnSize});
+        mute_.setBounds({muteRight - btnSize, btnY, btnSize, btnSize});
 
-        slider_.setBounds({x + tokens::kSpace2, y + layout::kRowOutH + tokens::kSpace1,
-                           w - tokens::kSpace2 * 2.f, tokens::kControlHeight});
+        slider_.setBounds({x + tokens::kSpace2 * s, y + rowH + tokens::kSpace1 * s,
+                           w - tokens::kSpace2 * s * 2.f,
+                           tokens::kControlHeight * s});
 
-        const float dropY = y + layout::kAppRowH + tokens::kSpace1;
-        route_.setBounds({x + tokens::kSpace2, dropY, w - tokens::kSpace2 * 2.f,
-                          tokens::kControlHeight});
+        const float dropY = y + (layout::kAppRowH + tokens::kSpace1) * s;
+        route_.setBounds({x + tokens::kSpace2 * s, dropY,
+                          w - tokens::kSpace2 * s * 2.f, tokens::kControlHeight * s});
     }
 
     // Volume: aplicado em Up/Wheel/seta (nao no Move) para nao bombear o host.
@@ -527,6 +618,7 @@ private:
     std::wstring subtitle_;
     std::vector<std::wstring> routeIds_;
     bool routingEnabled_ = true;
+    bool hoveredRow_ = false;   // hover da linha inteira (pintado no render)
     float committedVolume_ = 1.f;
     Callbacks callbacks_;
 
@@ -538,26 +630,30 @@ private:
 
 // ---------------------------------------------------------------------------
 // Altura do painel a partir do plano (compartilhado por testes e janela).
+// `scale` = dpiScale(): com 1.0 tudo fica em px logicos; > 1.0 o plano sai
+// em px FISICOS (pronto para resizeClient/computeMixerRect).
 // ---------------------------------------------------------------------------
-LayoutPlan planForContent(float content, float workHeight)
+LayoutPlan planForContent(float content, float workHeight, float scale)
 {
     LayoutPlan plan;
-    plan.contentHeight = content;
-    plan.panelTop = layout::kPad + layout::kHeaderH + layout::kHeaderGap;
+    plan.contentHeight = content * scale;
+    plan.panelTop = (layout::kPad + layout::kHeaderH + layout::kHeaderGap) * scale;
 
-    const float full = plan.panelTop + content + layout::kPad;
+    const float full = plan.panelTop + plan.contentHeight + layout::kPad * scale;
     const float maxH = workHeight * layout::kMaxWorkRatio;
     float windowH = (full < maxH) ? full : maxH;
-    if (windowH < layout::kMinWindowH) {
-        windowH = layout::kMinWindowH;
+    const float minH = layout::kMinWindowH * scale;
+    if (windowH < minH) {
+        windowH = minH;
     }
     plan.windowHeight = windowH;
 
-    plan.viewport = windowH - plan.panelTop - layout::kPad;
+    plan.viewport = windowH - plan.panelTop - layout::kPad * scale;
     if (plan.viewport < 0.f) {
         plan.viewport = 0.f;
     }
-    plan.maxScroll = (content > plan.viewport) ? (content - plan.viewport) : 0.f;
+    plan.maxScroll = (content > plan.viewport) ? (plan.contentHeight - plan.viewport)
+                                               : 0.f;
     return plan;
 }
 
@@ -715,9 +811,9 @@ float contentHeightFor(const ContentSpec& spec)
     return total;
 }
 
-LayoutPlan planLayout(const ContentSpec& spec, float workHeight)
+LayoutPlan planLayout(const ContentSpec& spec, float workHeight, float scale)
 {
-    return planForContent(contentHeightFor(spec), workHeight);
+    return planForContent(contentHeightFor(spec), workHeight, scale);
 }
 
 std::vector<SessionInfo> orderSessions(const std::vector<SessionInfo>& sessions)
@@ -819,7 +915,6 @@ public:
         panel_.setGap(layout::kGap);
 
         settingsBtn_.setGlyph(tokens::kIconSettings);
-        settingsBtn_.setAccessibleName(tr(L"mixer.title"));
         settingsBtn_.setOnClick([this] {
             if (host_.openSettings) {
                 host_.openSettings();
@@ -846,14 +941,14 @@ public:
     void showFlyout(POINT anchor)
     {
         anchor_ = anchor;
-        refresh();
+        refresh();   // re-traduz e refaz o layout SEMPRE ao abrir
 
         RECT work{};
         if (!workAreaAt(anchor_, work)) {
             SI_LOG_WARN("mixer", L"Area de trabalho indisponivel para o mixer");
             return;
         }
-        const float width = layout::kWidth * dpiScale();
+        const float width = layout::kWidth * scale_;
         const RECT rect = computeMixerRect(anchor_, {width, plan_.windowHeight}, work);
         showAt(rect.left, rect.top, true);   // ativa: teclado/Escape funcionam
         SetWindowPos(hwnd(), HWND_TOPMOST, 0, 0, 0, 0,
@@ -879,12 +974,32 @@ public:
         refresh();
     }
 
+    // F5: true se o flyout foi escondido por perda de foco ha menos de
+    // kTrayGuardMs — o clique na tray que causou o hide ainda vai postar
+    // WM_APP_SHOW_REQUEST, e reabrir faria o flyout "piscar".
+    bool recentlyHiddenByFocus() const
+    {
+        return hiddenByFocusTick_ != 0 &&
+               GetTickCount() - hiddenByFocusTick_ < kTrayGuardMs;
+    }
+
+    // Consome a guarda: o proximo toggle volta ao comportamento normal.
+    void consumeHiddenByFocus() { hiddenByFocusTick_ = 0; }
+
     void refresh()
     {
         refreshPending_ = false;
         if (!valid()) {
             return;
         }
+
+        // DPI: uma unica fonte de escala para janela, painel e controles.
+        scale_ = dpiScale();
+        panel_.setGap(layout::kGap * scale_);
+        settingsBtn_.setScale(scale_);
+        // Engrenagem abre as Configuracoes (chave existente); re-traduz a
+        // cada refresh para pegar troca de idioma na proxima abertura.
+        settingsBtn_.setAccessibleName(tr(L"settings.title"));
 
         outputs_.clear();
         defaultId_.clear();
@@ -926,7 +1041,12 @@ public:
         addSection(tr(L"mixer.apps"));
         spec.appRows = plan.apps.size();
         if (plan.apps.empty()) {
-            addEmpty(tr(L"mixer.empty"));
+            // Dica so aparece quando a chave existir na tabela i18n (a chave
+            // nova foi PEDIDA ao dono de i18n — tr() devolve a propria chave
+            // enquanto nao for adicionada; nao exibimos o literal cru).
+            const std::wstring emptyHint = tr(L"mixer.emptyHint");
+            const bool hintReady = (emptyHint != L"mixer.emptyHint");
+            addEmpty(tr(L"mixer.empty"), hintReady ? emptyHint.c_str() : nullptr);
         } else {
             for (const auto& session : plan.apps) {
                 addAppRow(session, labels, false);
@@ -958,9 +1078,12 @@ public:
             SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
         }
         const float workHeight = static_cast<float>(work.bottom - work.top);
-        plan_ = planLayout(spec, workHeight);
+        // Plano em px FISICOS (workHeight e fisica; scale aplicado dentro).
+        plan_ = planLayout(spec, workHeight, scale_);
 
-        const float width = layout::kWidth * dpiScale();
+        const float width = layout::kWidth * scale_;
+        // Altura ESCALADA: antes so a largura multiplicava o DPI e a janela
+        // ficava achatada em monitores high-DPI.
         resizeClient(static_cast<int>(std::lround(width)),
                      static_cast<int>(std::lround(plan_.windowHeight)));
         const Rect client = clientBounds();
@@ -1001,6 +1124,12 @@ protected:
                 applyPendingRefresh();
                 result = 0;
                 return true;
+            case WM_DPICHANGED:
+                // Monitor novo = DPI novo: reconstrui janela/painel/controles
+                // com o scale atualizado (a base so reposiciona o HWND).
+                requestRefresh();
+                result = 0;
+                return true;
             default:
                 break;
         }
@@ -1010,29 +1139,34 @@ protected:
     void onRender(IRenderTarget& rt, const Rect& client) override
     {
         const tokens::Palette pal = palette();
+        const float s = scale_;
         rt.clear(pal.windowBg);
+
+        const float pad = layout::kPad * s;
+        const float headerH = layout::kHeaderH * s;
+        const float iconBox = kIconBox * s;
 
         TextStyle icon;
         icon.fontFamily = tokens::kFontIcons;
-        icon.fontSize = tokens::kFontBody;
+        icon.fontSize = tokens::kFontBody * s;
         icon.weight = tokens::kWeightRegular;
         icon.color = pal.accent;
         icon.align = TextStyle::Align::Center;
         icon.valign = TextStyle::VAlign::Middle;
-        const Rect iconBox{layout::kPad, layout::kPad, kIconBox, layout::kHeaderH};
-        rt.drawGlyph(tokens::kIconSpeaker, iconBox, icon);
+        const Rect iconBoxRect{pad, pad, iconBox, headerH};
+        rt.drawGlyph(tokens::kIconSpeaker, iconBoxRect, icon);
 
         TextStyle title;
         title.fontFamily = tokens::kFontUi;
-        title.fontSize = tokens::kFontSubtitle;
+        title.fontSize = tokens::kFontSubtitle * s;
         title.weight = tokens::kWeightSemibold;
         title.color = pal.textPrimary;
         title.align = TextStyle::Align::Left;
         title.valign = TextStyle::VAlign::Middle;
-        const float titleX = layout::kPad + kIconBox + tokens::kSpace2;
-        const float titleW = client.w - titleX - layout::kPad - kBtnSize - tokens::kSpace2;
-        const Rect titleBox{titleX, layout::kPad, titleW > 0.f ? titleW : 0.f,
-                            layout::kHeaderH};
+        const float titleX = pad + iconBox + tokens::kSpace2 * s;
+        const float btnSize = kBtnSize * s;
+        const float titleW = client.w - titleX - pad - btnSize - tokens::kSpace2 * s;
+        const Rect titleBox{titleX, pad, titleW > 0.f ? titleW : 0.f, headerH};
         rt.drawText(tr(L"mixer.title"), titleBox, title);
 
         settingsBtn_.render(rt, pal);
@@ -1048,6 +1182,10 @@ protected:
         if (GetTickCount() - shownTick_ < kSettleMs) {
             return;
         }
+        // Perda de foco esconde o flyout: marca o instante para o toggleAt
+        // consumir o pedido da tray que chega logo em seguida (F5). So este
+        // caminho marca — hide() explicito (WM_CLOSE, toggleAt) nao marca.
+        hiddenByFocusTick_ = GetTickCount();
         hide();
     }
 
@@ -1063,10 +1201,23 @@ protected:
 
         switch (e.kind) {
             case PointerKind::Down: {
-                // Dropdown aberto: clique fora dele recolhe antes do dispatch.
+                // Captura ativa (ex.: hold do slider): o Down — mesmo de
+                // outro botao — e do controle capturado. Re-hit-testar
+                // trocaria o alvo, engolia o Up original e o controle
+                // interno ficava "preso" (Move sem botao aplicando valor;
+                // padrao do modal, modal_common.cpp:512-517).
+                if (capture_ != nullptr) {
+                    capture_->onPointer(e);
+                    return true;
+                }
+
+                // Dropdown aberto: clique fora dele recolhe e CONSOME o
+                // gesto — nao atravessa para o controle de baixo (padrao
+                // settings_page.cpp:107,117-120).
                 if (expandedRow_ != nullptr &&
                     !expandedRow_->bounds().contains(e.x, e.y)) {
                     expandedRow_->collapseRoute();
+                    return true;
                 }
 
                 Control* target = nullptr;
@@ -1083,13 +1234,18 @@ protected:
                     return false;
                 }
 
-                setFocusTo(focusTarget);
                 capture_ = target;   // trava o refresh durante o dispatch
                 const bool consumed = target->onPointer(e);
                 if (consumed) {
                     captureMouse();
                 } else {
                     capture_ = nullptr;
+                }
+                // Foco de teclado so no clique esquerdo consumido: antes o
+                // setFocusTo rodava antes do dispatch e sem filtrar botao —
+                // clique direito mudava o foco com o popup aberto.
+                if (consumed && e.button == MouseButton::Left) {
+                    setFocusTo(focusTarget);
                 }
                 return consumed;
             }
@@ -1112,21 +1268,51 @@ protected:
                 return consumed;
             }
 
-            case PointerKind::Up:
-            case PointerKind::Leave: {
+            case PointerKind::Up: {
                 if (capture_ == nullptr) {
                     return false;
                 }
                 Control* target = capture_;
                 const bool consumed = target->onPointer(e);
-                if (e.kind == PointerKind::Up) {
+                // Up de outro botao nao conclui a interacao: o controle
+                // segura a captura e a janela mantem o roteamento (padrao do
+                // modal_common). Soltar aqui deixaria um captured_ fantasma
+                // no controle — ex.: slider aplicando volume no hover.
+                if (e.button == MouseButton::Left) {
                     releaseMouse();
+                    capture_ = nullptr;
                 }
-                capture_ = nullptr;
                 return consumed;
             }
 
+            case PointerKind::Leave: {
+                if (capture_ != nullptr) {
+                    // Capturado: repassa ao alvo sem liberar — Up e
+                    // WM_CAPTURECHANGED cuidam do fim da captura.
+                    return capture_->onPointer(e);
+                }
+                // Sem captura: o cursor saiu da janela — limpa o hover de
+                // TODOS os filhos (antes o Leave era descartado e o hover
+                // do ultimo controle ficava pintado).
+                settingsBtn_.onPointer(e);
+                panel_.layout();
+                for (Control* child : panel_.children()) {
+                    if (child->visible()) {
+                        child->onPointer(e);
+                    }
+                }
+                return false;
+            }
+
             case PointerKind::Wheel: {
+                // Captura ativa: o wheel e do controle capturado (ex.:
+                // ajusta o slider sob o cursor). NAO rola o painel —
+                // deslocaria o conteudo, o Up cairia fora do alvo e o
+                // clique seria engolido (critico em trackpads, que
+                // emitem wheel durante o hold; espelha modal_common.cpp:574).
+                if (capture_ != nullptr) {
+                    return capture_->onPointer(e);
+                }
                 if (!panel_.bounds().contains(e.x, e.y)) {
                     return false;
                 }
@@ -1170,6 +1356,20 @@ protected:
         return false;
     }
 
+    // Cursor: mao sobre engrenagem e controles interativos (linhas de saida,
+    // mute/chevron/slider/dropdown); seta no resto (WM_SETCURSOR da base).
+    CursorShape onQueryCursor(float x, float y) override
+    {
+        if (settingsBtn_.containsPoint(x, y)) {
+            return CursorShape::Hand;
+        }
+        if (!panel_.bounds().contains(x, y)) {
+            return CursorShape::Arrow;
+        }
+        return hitInteractive(x, y) != nullptr ? CursorShape::Hand
+                                                : CursorShape::Arrow;
+    }
+
 private:
     // RAII: adia o refresh enquanto um evento esta sendo despachado.
     struct DispatchGuard {
@@ -1204,18 +1404,20 @@ private:
 
     void updatePanelBounds(float clientW, float clientH)
     {
-        const float panelY = layout::kPad + layout::kHeaderH + layout::kHeaderGap;
-        float panelW = clientW - layout::kPad * 2.f;
-        float panelH = clientH - panelY - layout::kPad;
+        const float pad = layout::kPad * scale_;
+        // panelTop vem do plano (px fisicos) — unica fonte de verdade.
+        const float panelY = plan_.panelTop;
+        float panelW = clientW - pad * 2.f;
+        float panelH = clientH - panelY - pad;
         if (panelW < 0.f) {
             panelW = 0.f;
         }
         if (panelH < 0.f) {
             panelH = 0.f;
         }
-        panel_.setBounds({layout::kPad, panelY, panelW, panelH});
-        settingsBtn_.setBounds({clientW - layout::kPad - kBtnSize, layout::kPad, kBtnSize,
-                                kBtnSize});
+        panel_.setBounds({pad, panelY, panelW, panelH});
+        const float btn = kBtnSize * scale_;
+        settingsBtn_.setBounds({clientW - pad - btn, pad, btn, btn});
     }
 
     controls::InteractiveControl* hitInteractive(float x, float y)
@@ -1287,6 +1489,7 @@ private:
     void addControl(std::unique_ptr<Control> control)
     {
         Control* raw = control.get();
+        raw->setScale(scale_);   // DPI: metricas internas dos controles
         pool_.push_back(std::move(control));
         panel_.addControl(raw);
 
@@ -1294,17 +1497,19 @@ private:
             focusables_.push_back(interactive);
         }
         if (auto* row = dynamic_cast<AppRow*>(raw)) {
+            row->applyScale(scale_);   // slider/mute/chevron/dropdown internos
             row->collectFocus(focusables_);
         }
 
         const float height = raw->measure(layout::kWidth).h;
-        contentRun_ += (panel_.children().size() > 1 ? layout::kGap : 0.f) + height;
+        contentRun_ +=
+            (panel_.children().size() > 1 ? layout::kGap * scale_ : 0.f) + height;
     }
 
     float nextChildY() const
     {
         const bool first = panel_.children().empty();
-        return contentRun_ + (first ? 0.f : layout::kGap);
+        return contentRun_ + (first ? 0.f : layout::kGap * scale_);
     }
 
     void addSection(const wchar_t* text)
@@ -1315,11 +1520,15 @@ private:
         addControl(std::move(label));
     }
 
-    void addEmpty(const wchar_t* text)
+    // Estado vazio: rotulo + dica de proximo passo (chave a pedir ao i18n).
+    void addEmpty(const wchar_t* text, const wchar_t* hint)
     {
         auto label = std::make_unique<SectionLabel>();
         label->setKind(SectionLabel::Kind::Empty);
         label->setText(text);
+        if (hint != nullptr) {
+            label->setHint(hint);
+        }
         addControl(std::move(label));
     }
 
@@ -1328,10 +1537,14 @@ private:
     void addOutputRow(const DeviceInfo& device)
     {
         auto row = std::make_unique<OutputRow>();
+        row->setScale(scale_);
         row->setTitle(device.friendlyName);
         row->setGlyph(outputGlyphFor(device.friendlyName));
         row->isDefault = (device.id == defaultId_);
         row->setAccessibleName(device.friendlyName);
+        // Reserva (px fisicos — ListRow aplica o valor cru) para o check de
+        // saida padrao: o titulo nao invade o glifo em nenhum DPI.
+        row->setTrailingInset(kIconBox * scale_);
 
         const std::wstring deviceId = device.id;
         row->setOnClick([this, deviceId] {
@@ -1375,6 +1588,7 @@ private:
 
         auto row = std::make_unique<AppRow>();
         AppRow* raw = row.get();
+        raw->setScale(scale_);   // measure() abaixo precisa do DPI aplicado
 
         AppRow::Callbacks callbacks;
         callbacks.onVolume = [this, instanceId](float volume) {
@@ -1423,6 +1637,8 @@ private:
     MixerHost host_;
     POINT anchor_{};
     DWORD shownTick_ = 0;
+    DWORD hiddenByFocusTick_ = 0;   // F5: tick do hide por perda de foco (0 = nunca)
+    float scale_ = 1.f;   // dpiScale() fixado no refresh (fonte unica)
 
     controls::ListPanel panel_;
     GlyphButton settingsBtn_;
@@ -1498,6 +1714,14 @@ void toggleAt(POINT anchor)
 {
     Module& state = module();
     if (!state.initialized) {
+        return;
+    }
+    // clique na tray fecha o flyout que perdeu foco no mesmo instante;
+    // sem isto o pedido reabre e o flyout "pisca": o clique gera
+    // WA_INACTIVE -> hide ANTES de WM_APP_SHOW_REQUEST chegar, entao o
+    // toggle consumido aqui mantem o flyout fechado (F5).
+    if (state.window && state.window->recentlyHiddenByFocus()) {
+        state.window->consumeHiddenByFocus();
         return;
     }
     if (!state.window) {

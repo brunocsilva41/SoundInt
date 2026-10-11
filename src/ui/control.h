@@ -40,6 +40,11 @@ public:
     void setAccessibleName(std::wstring name) { accessibleName_ = std::move(name); }
     const std::wstring& accessibleName() const { return accessibleName_; }
 
+    // Fator DPI do controle (1.0 = 96 DPI). A janela chama setScale() no
+    // layout; o controle usa scale() para fontes, paddings e hit-tests.
+    void setScale(float scale) { scale_ = scale; }
+    float scale() const { return scale_; }
+
     // Marca a janela pai como suja (usa o handler global de requestRender).
     void invalidate();
 
@@ -47,6 +52,7 @@ protected:
     Rect bounds_{};
     bool enabled_ = true;
     bool visible_ = true;
+    float scale_ = 1.f;
     std::wstring accessibleName_;
 };
 

@@ -31,7 +31,7 @@ protected:
         renderOverlay(rt, palette, bounds_);
     }
 
-    // Borda de foco: accent 1.5px.
+    // Borda de foco: accent 1px (2px a partir de 200% de DPI).
     void renderFocus(IRenderTarget& rt, const tokens::Palette& palette,
                      const Rect& rect) const;
     void renderFocus(IRenderTarget& rt, const tokens::Palette& palette) const

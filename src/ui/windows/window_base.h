@@ -14,9 +14,14 @@
 #include "ui/design_tokens.h"
 #include "ui/renderer.h"
 
+#include <cstdint>
+
 #include <windows.h>
 
 namespace soundint::ui {
+
+// Forma do cursor sob o ponteiro (resposta ao WM_SETCURSOR).
+enum class CursorShape : uint8_t { Arrow, Hand, Text };
 
 class WindowBase {
 public:
@@ -67,6 +72,14 @@ protected:
     virtual bool onPointer(const PointerEvent&) { return false; }  // traduzida
     virtual bool onKey(const KeyEvent&) { return false; }          // WM_KEYDOWN/UP
     virtual bool onChar(wchar_t) { return false; }                 // WM_CHAR
+
+    // Cursor sob o ponteiro (WM_SETCURSOR; cliente em px fisicos). Padrao:
+    // seta. Devolva Hand sobre controles interativos e Text sobre campos de
+    // edicao. So e consultado em movimento — manter barato (hit-test apenas).
+    virtual CursorShape onQueryCursor(float /*x*/, float /*y*/)
+    {
+        return CursorShape::Arrow;
+    }
 
     // Captura do mouse (rota Move/Up ate ReleaseCapture).
     void captureMouse();

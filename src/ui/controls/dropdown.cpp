@@ -1,10 +1,8 @@
 #include "ui/controls/dropdown.h"
 
-namespace soundint::ui::controls {
+#include "ui/controls/metrics.h"
 
-namespace {
-constexpr float kGlyphBox = 16.f;   // caixa do glifo de icone
-}  // namespace
+namespace soundint::ui::controls {
 
 // ---------------------------------------------------------------------------
 // Estado
@@ -42,10 +40,13 @@ void Dropdown::select(size_t index, bool notify)
     }
     selected_ = index;
     highlight_ = index;
+    // RESILIENCIA A UAF: onChanged_ pode recriar a lista dona deste dropdown
+    // (rebuild sincrono). Invalidamos ANTES e nao tocamos em `this` depois
+    // que o callback roda.
+    invalidate();
     if (notify && onChanged_) {
         onChanged_(index);
     }
-    invalidate();
 }
 
 void Dropdown::stepIndex(size_t& index, int direction)
@@ -85,27 +86,46 @@ void Dropdown::collapse()
 }
 
 // ---------------------------------------------------------------------------
-// Geometria pura
+// API aditiva (janelas): estado/retangulo do popup
 // ---------------------------------------------------------------------------
+bool Dropdown::isPopupOpen() const
+{
+    return expanded_;
+}
+
+Rect Dropdown::popupBounds() const
+{
+    return expanded_ ? popupRect() : Rect{};
+}
+
+// ---------------------------------------------------------------------------
+// Geometria pura (escalada por scale_)
+// ---------------------------------------------------------------------------
+float Dropdown::itemHeight() const
+{
+    return kItemHeight * scale_;
+}
+
 Rect Dropdown::fieldRect() const
 {
-    const float h = (bounds_.h >= tokens::kControlHeight) ? tokens::kControlHeight
-                                                          : bounds_.h;
+    const float fieldH = tokens::kControlHeight * scale_;
+    const float h = (bounds_.h >= fieldH) ? fieldH : bounds_.h;
     return {bounds_.x, bounds_.y, bounds_.w, h};
 }
 
 Rect Dropdown::popupRect() const
 {
     const Rect field = fieldRect();
-    const float h = static_cast<float>(items_.size()) * kItemHeight;
+    const float h = static_cast<float>(items_.size()) * itemHeight();
     return {field.x, field.y + field.h, field.w, h};
 }
 
 Rect Dropdown::itemRect(size_t index) const
 {
     const Rect pop = popupRect();
-    const float y = pop.y + static_cast<float>(index) * kItemHeight;
-    return {pop.x, y, pop.w, kItemHeight};
+    const float itemH = itemHeight();
+    const float y = pop.y + static_cast<float>(index) * itemH;
+    return {pop.x, y, pop.w, itemH};
 }
 
 size_t Dropdown::hitItem(float x, float y) const
@@ -114,7 +134,7 @@ size_t Dropdown::hitItem(float x, float y) const
     if (items_.empty() || !pop.contains(x, y)) {
         return kNoIndex;
     }
-    const size_t i = static_cast<size_t>((y - pop.y) / kItemHeight);
+    const size_t i = static_cast<size_t>((y - pop.y) / itemHeight());
     return (i < items_.size()) ? i : kNoIndex;
 }
 
@@ -133,74 +153,70 @@ void Dropdown::render(IRenderTarget& rt, const tokens::Palette& palette)
         return;
     }
 
-    const Rect field = fieldRect();
-    rt.fillRoundedRect(field, tokens::kRadiusMd, palette.surface);
-    rt.strokeRoundedRect(field, tokens::kRadiusMd, 1.f, palette.border);
-    if (enabled_) {
-        if (pressed_) {
-            rt.fillRoundedRect(field, tokens::kRadiusMd, palette.pressed);
-        } else if (hovered_) {
-            rt.fillRoundedRect(field, tokens::kRadiusMd, palette.hover);
-        }
-    }
+    const float radius = metrics::radius(tokens::kRadiusMd, scale_);
+    const float stroke = metrics::stroke(scale_);
+    const float padX = tokens::kSpace2 * scale_;
+    const float glyphBox = metrics::glyphBox(scale_);
 
-    const float chevronX = field.x + field.w - tokens::kSpace2 - kGlyphBox;
-    const float textW = chevronX - tokens::kSpace2 * 2.f - field.x;
+    const Rect field = fieldRect();
+    rt.fillRoundedRect(field, radius, enabled_ ? palette.surface : palette.surfaceAlt);
+    rt.strokeRoundedRect(field, radius, stroke, palette.border);
+    renderOverlay(rt, palette, field);
+
+    const float chevronX = field.x + field.w - padX - glyphBox;
+    const float textW = chevronX - padX * 2.f - field.x;
     const std::wstring label =
         (selected_ < items_.size()) ? items_[selected_] : std::wstring{};
 
     TextStyle ts;
     ts.fontFamily = tokens::kFontUi;
-    ts.fontSize = tokens::kFontBody;
+    ts.fontSize = tokens::kFontBody * scale_;
     ts.weight = tokens::kWeightRegular;
     ts.color = enabled_ ? palette.textPrimary : palette.textSecondary;
     ts.align = TextStyle::Align::Left;
     ts.valign = TextStyle::VAlign::Middle;
-    const Rect textBox{field.x + tokens::kSpace2, field.y,
-                       textW > 0.f ? textW : 0.f, field.h};
+    const Rect textBox{field.x + padX, field.y, textW > 0.f ? textW : 0.f, field.h};
     rt.drawText(label, textBox, ts);
 
     TextStyle chevron;
     chevron.fontFamily = tokens::kFontIcons;
-    chevron.fontSize = tokens::kFontBody;
+    chevron.fontSize = tokens::kFontBody * scale_;
     chevron.weight = tokens::kWeightRegular;
-    chevron.color = expanded_ ? palette.accent : palette.textSecondary;
+    chevron.color = (enabled_ && expanded_) ? palette.accent : palette.textSecondary;
     chevron.align = TextStyle::Align::Center;
     chevron.valign = TextStyle::VAlign::Middle;
-    const Rect chevronBox{chevronX, field.y, kGlyphBox, field.h};
+    const Rect chevronBox{chevronX, field.y, glyphBox, field.h};
     rt.drawGlyph(tokens::kIconChevronDown, chevronBox, chevron);
 
     if (expanded_ && !items_.empty()) {
         const Rect pop = popupRect();
         rt.pushClip(pop);
-        rt.fillRoundedRect(pop, tokens::kRadiusMd, palette.surface);
-        rt.strokeRoundedRect(pop, tokens::kRadiusMd, 1.f, palette.border);
+        rt.fillRoundedRect(pop, radius, palette.surface);
+        rt.strokeRoundedRect(pop, radius, stroke, palette.border);
 
         for (size_t i = 0; i < items_.size(); ++i) {
             const Rect ir = itemRect(i);
             const bool active = enabled_ && (i == hoverItem_ || i == highlight_);
             if (active) {
-                rt.fillRoundedRect(ir, tokens::kRadiusMd, palette.hover);
+                rt.fillRoundedRect(ir, radius, palette.hover);
             }
 
             const bool isSel = (i == selected_);
             TextStyle item;
             item.fontFamily = tokens::kFontUi;
-            item.fontSize = tokens::kFontBody;
+            item.fontSize = tokens::kFontBody * scale_;
             item.weight = isSel ? tokens::kWeightSemibold : tokens::kWeightRegular;
             item.color = isSel ? palette.accent : palette.textPrimary;
             item.align = TextStyle::Align::Left;
             item.valign = TextStyle::VAlign::Middle;
 
-            const float checkW = isSel ? kGlyphBox + tokens::kSpace2 : 0.f;
-            const float boxW = ir.w - tokens::kSpace2 * 2.f - checkW;
-            const Rect itemBox{ir.x + tokens::kSpace2, ir.y, boxW > 0.f ? boxW : 0.f,
-                              ir.h};
+            const float checkW = isSel ? glyphBox + padX : 0.f;
+            const float boxW = ir.w - padX * 2.f - checkW;
+            const Rect itemBox{ir.x + padX, ir.y, boxW > 0.f ? boxW : 0.f, ir.h};
             rt.drawText(items_[i], itemBox, item);
 
             if (isSel) {
-                const Rect check{ir.x + ir.w - tokens::kSpace2 - kGlyphBox, ir.y,
-                                 kGlyphBox, ir.h};
+                const Rect check{ir.x + ir.w - padX - glyphBox, ir.y, glyphBox, ir.h};
                 rt.drawGlyph(tokens::kIconCheck, check, item);
             }
         }
@@ -246,7 +262,11 @@ bool Dropdown::onPointer(const PointerEvent& e)
 
     case PointerKind::Move: {
         if (captured_) {
+            // Realce do popup segue o cursor mesmo capturado: o hit por
+            // posicao cobre Leave+volta sem congelar o estado visual.
             pressed_ = field.contains(e.x, e.y);
+            hoverItem_ = (expanded_ && pop.contains(e.x, e.y)) ? hitItem(e.x, e.y)
+                                                              : kNoIndex;
             invalidate();
             return true;
         }
@@ -270,6 +290,10 @@ bool Dropdown::onPointer(const PointerEvent& e)
     case PointerKind::Up: {
         if (!captured_) {
             return false;
+        }
+        // Up de outro botao nao conclui a interacao (segura a captura).
+        if (e.button != MouseButton::Left) {
+            return true;
         }
         captured_ = false;
         pressed_ = false;
@@ -386,7 +410,7 @@ bool Dropdown::onKey(const KeyEvent& e)
 
 Size Dropdown::measure(float constraintWidth)
 {
-    return {constraintWidth, tokens::kControlHeight};
+    return {constraintWidth, tokens::kControlHeight * scale_};
 }
 
 }  // namespace soundint::ui::controls

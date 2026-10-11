@@ -1,4 +1,4 @@
-; ============================================================================
+﻿; ============================================================================
 ; SoundInt — instalador per-user (Inno Setup 6.3+).
 ;
 ; Compilacao local:
@@ -74,7 +74,7 @@ Source: "{#SoundIntExe}"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"; \
-    Comment: "Roteador de saida de audio por aplicativo"; WorkingDir: "{app}"
+    Comment: "Roteador de saída de áudio por aplicativo"; WorkingDir: "{app}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; \
     Tasks: desktopicon; WorkingDir: "{app}"
 
