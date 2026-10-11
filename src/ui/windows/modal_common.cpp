@@ -248,6 +248,10 @@ bool CheckBox::onPointer(const PointerEvent& e)
             if (!captured_) {
                 return false;
             }
+            // Up de outro botao nao conclui a interacao (segura a captura).
+            if (e.button != MouseButton::Left) {
+                return true;
+            }
             captured_ = false;
             pressed_ = false;
             const bool inside = bounds_.contains(e.x, e.y);
@@ -348,6 +352,10 @@ bool AccentButton::onPointer(const PointerEvent& e)
             if (!captured_) {
                 return false;
             }
+            // Up de outro botao nao conclui a interacao (segura a captura).
+            if (e.button != MouseButton::Left) {
+                return true;
+            }
             captured_ = false;
             pressed_ = false;
             const bool inside = bounds_.contains(e.x, e.y);
@@ -424,6 +432,7 @@ bool ModalWindow::present(POINT anchor)
     }
     resetInteraction();
     reframe();
+    shownTick_ = GetTickCount();
     return isVisible();
 }
 
@@ -555,7 +564,11 @@ bool ModalWindow::onPointer(const PointerEvent& e)
         case PointerKind::Up: {
             if (captured_) {
                 controls::InteractiveControl* target = captured_;
-                captured_ = nullptr;
+                // Up de outro botao nao conclui a interacao (o controle
+                // segue capturado): o roteamento da janela acompanha.
+                if (e.button == MouseButton::Left) {
+                    captured_ = nullptr;
+                }
                 const bool consumed = target->onPointer(e);
                 syncState();
                 return consumed;
@@ -735,6 +748,23 @@ void onModalClosed(ModalWindow*)
     scheduleShowNext();
 }
 
+// Ancora na area da bandeja (perto do relogio): notificacao estilo flyout.
+// Antes usava GetCursorPos() — o modal nascia EM CIMA do que o usuario
+// estava fazendo quando o app comecou a tocar.
+POINT trayAnchor()
+{
+    HWND taskbar = FindWindowW(L"Shell_TrayWnd", nullptr);
+    if (taskbar != nullptr) {
+        RECT r{};
+        if (GetWindowRect(taskbar, &r)) {
+            return POINT{r.right - 260, r.top - 8};
+        }
+    }
+    RECT work{};
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+    return POINT{work.right - 260, work.bottom - 8};
+}
+
 void showNext()
 {
     Manager& m = manager();
@@ -742,10 +772,7 @@ void showNext()
         return;
     }
 
-    POINT anchor{};
-    if (!GetCursorPos(&anchor)) {
-        anchor = POINT{0, 0};   // fallback: monitor primario
-    }
+    const POINT anchor = trayAnchor();
 
     // Falha de criacao descarta o pedido e tenta o proximo (teto: capacidade).
     for (size_t attempts = 0; attempts <= kQueueCapacity && !m.showing &&

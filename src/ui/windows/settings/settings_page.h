@@ -74,6 +74,12 @@ public:
     void syncFromStore() { syncImpl(); }
     void refresh();   // retranslate() + syncFromStore()
 
+    // F3: a janela marca true enquanto h captura de mouse ativa — os
+    // layoutImpl com linhas dinamicas NAO reconstruem sob captura
+    // (rebuildRows destruiria o controle capturado; UAF no Up). Corpo
+    // inline no header: o .cpp pertence a outro track.
+    void setRebuildDeferred(bool deferred) { rebuildDeferred_ = deferred; }
+
     // Layout/pintura --------------------------------------------------------
     void layout(const Rect& area, float scale);
     void render(IRenderTarget& rt, const tokens::Palette& palette);
@@ -117,6 +123,11 @@ protected:
     // Altura total do conteudo (para scroll); padrao = nao rola.
     virtual float contentHeightImpl() const { return 0.f; }
 
+    // F3: true quando a janela adiou o rebuild (captura de mouse ativa).
+    // Paginas com linhas dinamicas consultam no layoutImpl antes de
+    // chamar rebuildRows().
+    bool rebuildDeferred() const { return rebuildDeferred_; }
+
     // Helpers de desenho (escalam por dpiScale) ------------------------------
     float s(float v) const { return v * scale_; }
     TextStyle textStyle(const tokens::Palette& palette, float fontSize, int weight,
@@ -133,6 +144,7 @@ protected:
     float scale_ = 1.f;
     float scrollY_ = 0.f;
     float contentH_ = 0.f;         // preenchido por layoutImpl
+    bool rebuildDeferred_ = false;  // F3: rebuild de linhas adiado (captura)
     std::vector<Control*> controls_;
     std::vector<TextField*> fields_;
 

@@ -368,7 +368,13 @@ void SettingsWindow::layout()
 
     SettingsPage* activePage = page();
     if (activePage != nullptr) {
+        // F3: com captura de mouse ativa, adia o rebuildRows das paginas —
+        // reconstruir destruiria o controle capturado (UAF no Up; ex.:
+        // segurar GRAVAR e apertar a tecla da combinacao). rowsDirty_ fica
+        // preservado: o proximo layout sem captura reconstrói.
+        activePage->setRebuildDeferred(capture_ != nullptr);
         activePage->layout(pageArea_, scale_);
+        activePage->setRebuildDeferred(false);
     }
 }
 
@@ -488,11 +494,20 @@ bool SettingsWindow::onPointer(const PointerEvent& e)
         layout();
     }
 
-    // Rota do controle capturado ate o Up/Leave.
-    if (capture_ != nullptr && e.kind != PointerKind::Down &&
-        e.kind != PointerKind::Wheel) {
+    // Rota do controle capturado ate o Up/Leave. Wheel tambem e do
+    // capturado (ex.: ajusta o slider sob o cursor sem rolar a pagina
+    // por baixo) e NAO solta a captura — espelha modal_common.cpp:574-576.
+    if (capture_ != nullptr && e.kind != PointerKind::Down) {
         Control* target = capture_;
-        if (e.kind != PointerKind::Move && e.kind != PointerKind::Leave) {
+        // Contrapartida do filtro dos controles (Track E/AG-7): Up de outro
+        // botao nao conclui interacao — mantem o roteamento para nao deixar
+        // captured_ fantasma no controle (overlay/click presos).
+        if (e.kind == PointerKind::Up && e.button != MouseButton::Left) {
+            target->onPointer(e);
+            return true;
+        }
+        if (e.kind != PointerKind::Move && e.kind != PointerKind::Leave &&
+            e.kind != PointerKind::Wheel) {
             capture_ = nullptr;
             releaseMouse();
         }

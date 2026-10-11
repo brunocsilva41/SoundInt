@@ -137,7 +137,12 @@ bool Slider::onPointer(const PointerEvent& e)
 
     case PointerKind::Move:
         if (captured_) {
+            // Padrao do Button: estado visual acompanha a posicao durante o
+            // drag (fora dos bounds = solto; volta = pressionado de novo).
+            pressed_ = bounds_.contains(e.x, e.y);
+            hovered_ = pressed_;
             applyValue(valueFromX(e.x, bounds_, kThumbD * scale_));
+            invalidate();
             return true;
         }
         if (updateHover(e.x, e.y)) {
@@ -148,6 +153,10 @@ bool Slider::onPointer(const PointerEvent& e)
     case PointerKind::Up:
         if (!captured_) {
             return false;
+        }
+        // Up de outro botao nao conclui a interacao (segura a captura).
+        if (e.button != MouseButton::Left) {
+            return true;
         }
         captured_ = false;
         pressed_ = false;

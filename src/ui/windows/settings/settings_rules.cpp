@@ -310,12 +310,15 @@ void RulesPage::focusProcessField()
 // ---------------------------------------------------------------------------
 void RulesPage::layoutImpl(const Rect& area, float /*scale*/)
 {
-    if (rowsDirty_) {
-        rebuildRows();
-        rowsDirty_ = false;
-    }
-    if (rows_.size() != core::Store::instance().rules().size()) {
-        rebuildRows();   // mutacao externa (ex.: mixer gravou uma regra)
+    // F3: rebuild adiado sob captura de mouse — rebuildRows destruiria a
+    // linha cujo botao esta pressionado (UAF no Up). rowsDirty_ NAO e
+    // limpo quando adiado: o proximo layout sem captura reconstrói (e a
+    // checagem de tamanho roda de novo la).
+    if (rowsDirty_ || rows_.size() != core::Store::instance().rules().size()) {
+        if (!rebuildDeferred()) {
+            rebuildRows();   // rowsDirty_ ou mutacao externa (mixer gravou regra)
+            rowsDirty_ = false;
+        }
     }
     const auto& rules = core::Store::instance().rules();
 

@@ -25,6 +25,10 @@
 
 namespace soundint::ui::modal {
 
+// Janela de settle: perda de foco logo apos mostrar (foreground lock /
+// mudanca transitoria) nao fecha o modal recem-nascido.
+constexpr DWORD kDeactivateSettleMs = 400;
+
 // ---------------------------------------------------------------------------
 // Seam de integracao (Wave 3) — callbacks injetados via init()
 // ---------------------------------------------------------------------------
@@ -211,6 +215,25 @@ protected:
     void onDestroy() override;
     // Cursor: mao sobre qualquer controle interativo (WM_SETCURSOR da base).
     CursorShape onQueryCursor(float x, float y) override;
+    // Notificacao ignorada (usuario clicou fora): fecha como cancelamento.
+    // Sem isto o modal flutua para sempre por cima do trabalho e trava a
+    // fila ("1 por vez" nunca avanca).
+    void onActivate(bool active) override
+    {
+        if (active) {
+            return;
+        }
+        // Clique em andamento (controle capturado OU captura Win32 ativa
+        // nesta janela): roubo de foreground por toasts/dispositivos nao
+        // pode matar a interacao. O modal permanece aberto.
+        if (captured_ != nullptr || GetCapture() == hwnd()) {
+            return;
+        }
+        if (GetTickCount() - shownTick_ < kDeactivateSettleMs) {
+            return;   // perda transitoria logo apos mostrar
+        }
+        onCancelAction();
+    }
 
 private:
     controls::InteractiveControl* hitTest(float x, float y) const;
@@ -225,6 +248,7 @@ private:
     controls::InteractiveControl* defaultFocus_ = nullptr;
     ClosedFn onClosed_;
     POINT anchor_{};
+    DWORD shownTick_ = 0;   // tick do present() (janela de settle)
 };
 
 }  // namespace soundint::ui::modal

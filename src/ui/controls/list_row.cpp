@@ -109,6 +109,11 @@ bool ListRow::onPointer(const PointerEvent& e)
         if (!captured_) {
             return false;
         }
+        // Up de outro botao nao conclui a interacao (segura a captura) —
+        // mesmo filtro de button/slider/dropdown/toggle.
+        if (e.button != MouseButton::Left) {
+            return true;
+        }
         captured_ = false;
         pressed_ = false;
         const bool inside = bounds_.contains(e.x, e.y);

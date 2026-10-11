@@ -358,13 +358,16 @@ void HotkeysPage::rebuildRows()
 
 void HotkeysPage::layoutImpl(const Rect& area, float /*scale*/)
 {
-    if (rowsDirty_) {
-        rebuildRows();
-        rowsDirty_ = false;
-    }
     const auto& hotkeys = core::Store::instance().settings().hotkeys;
-    if (rows_.size() != hotkeys.size()) {
-        rebuildRows();
+    // F3: rebuild adiado sob captura de mouse — segurar GRAVAR e apertar
+    // a tecla da combinacao marca rowsDirty_ (rawKeyImpl); reconstruir
+    // aqui destruiria o botao sob o mouse (UAF no Up). rowsDirty_ NAO e
+    // limpo quando adiado: o proximo layout sem captura reconstrói.
+    if (rowsDirty_ || rows_.size() != hotkeys.size()) {
+        if (!rebuildDeferred()) {
+            rebuildRows();
+            rowsDirty_ = false;
+        }
     }
 
     const float y0 = area.y - scrollY_;

@@ -72,6 +72,22 @@ TEST_CASE("update: parse manifest aceita campos desconhecidos")
     CHECK(error.empty());
 }
 
+TEST_CASE("update: parse manifest aceita sizeBytes legado (manifests 0.1.0)")
+{
+    // Contrato atual e "size"; releases 0.1.0 publicaram "sizeBytes" — o
+    // parser aceita os dois para nao quebrar o auto-check contra elas.
+    const char* json = R"json({
+        "version": "0.1.0", "tag": "v0.1.0", "url": "https://example.com/i.exe",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sizeBytes": 4242
+    })json";
+    std::wstring error;
+    const Manifest manifest = parseManifest(json, &error);
+    CHECK(manifest.valid);
+    CHECK(error.empty());
+    CHECK(manifest.sizeBytes == 4242);
+}
+
 TEST_CASE("update: parse manifest invalido nao e JSON")
 {
     std::wstring error;

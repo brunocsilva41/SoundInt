@@ -262,7 +262,11 @@ bool Dropdown::onPointer(const PointerEvent& e)
 
     case PointerKind::Move: {
         if (captured_) {
+            // Realce do popup segue o cursor mesmo capturado: o hit por
+            // posicao cobre Leave+volta sem congelar o estado visual.
             pressed_ = field.contains(e.x, e.y);
+            hoverItem_ = (expanded_ && pop.contains(e.x, e.y)) ? hitItem(e.x, e.y)
+                                                              : kNoIndex;
             invalidate();
             return true;
         }
@@ -286,6 +290,10 @@ bool Dropdown::onPointer(const PointerEvent& e)
     case PointerKind::Up: {
         if (!captured_) {
             return false;
+        }
+        // Up de outro botao nao conclui a interacao (segura a captura).
+        if (e.button != MouseButton::Left) {
+            return true;
         }
         captured_ = false;
         pressed_ = false;

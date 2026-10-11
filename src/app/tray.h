@@ -22,6 +22,13 @@ public:
     // Remove o icone (shutdown).
     void remove();
 
+    // Mensagem "TaskbarCreated" (Explorer reiniciou): o icone antigo morre
+    // com o Explorer; sem isto o app fica "zumbi" — sem icone, sem menu Sair.
+    static UINT taskbarCreatedMessage();
+
+    // Re-adiciona o icone apos o Explorer recriar a bandeja.
+    void readd();
+
     // Consome WM_APP_TRAY. Retorna true se a mensagem foi tratada.
     bool handleMessage(HWND hwnd, WPARAM wParam, LPARAM lParam);
 

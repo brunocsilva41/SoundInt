@@ -567,13 +567,16 @@ void ProfilesPage::rebuildRows()
 // ---------------------------------------------------------------------------
 void ProfilesPage::layoutImpl(const Rect& area, float /*scale*/)
 {
-    if (rowsDirty_) {
-        rebuildRows();
-        rowsDirty_ = false;
-    }
-    if (profileRows_.size() != core::Store::instance().profiles().size() ||
+    // F3: rebuild adiado sob captura de mouse — rebuildRows destruiria o
+    // botao capturado (UAF no Up). rowsDirty_ NAO e limpo quando adiado:
+    // o proximo layout sem captura reconstrói (checagens rodam de novo).
+    if (rowsDirty_ ||
+        profileRows_.size() != core::Store::instance().profiles().size() ||
         overrideRows_.size() != selectedRouteCount()) {
-        rebuildRows();   // mutacao externa ou selecao trocada
+        if (!rebuildDeferred()) {
+            rebuildRows();   // mutacao externa ou selecao trocada
+            rowsDirty_ = false;
+        }
     }
 
     const float y0 = area.y - scrollY_;

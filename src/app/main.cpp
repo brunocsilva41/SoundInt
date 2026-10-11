@@ -282,6 +282,10 @@ void wireUi(AppShell& shell, HWND window, soundint::core::Store& config)
 
 void shutdownShell()
 {
+    // Visibilidade de ciclo de vida: sem isto o log nao mostra NENHUMA
+    // evidencia de encerramento (impossivel diagnosticar "nao fecha").
+    SI_LOG_INFO("boot", L"SoundInt encerrando");
+
     // Nao postar wakeup em uma janela que esta sendo destruida.
     soundint::events().setWakeup({});
 
@@ -311,6 +315,15 @@ void shutdownShell()
 
 LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    // Explorer reiniciou: re-adiciona o icone da bandeja (sem isto o app
+    // ficaria "zumbi" — processo vivo, sem icone e sem menu Sair).
+    if (msg == soundint::Tray::taskbarCreatedMessage()) {
+        if (g_shell != nullptr) {
+            g_shell->tray.readd();
+        }
+        return 0;
+    }
+
     switch (msg) {
         case soundint::WM_APP_WAKEUP:
             soundint::events().pump();
@@ -356,6 +369,18 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 return 0;
             }
             DestroyWindow(hwnd);
+            return 0;
+
+        case WM_QUERYENDSESSION:
+            // Windows desligando/logoff: sempre pronto (sem dialogo).
+            return 1;
+
+        case WM_ENDSESSION:
+            // Fim de sessao confirmado: encaminha pelo caminho limpo (log,
+            // store, tray) em vez de deixar o Windows matar o processo.
+            if (wParam != 0) {
+                DestroyWindow(hwnd);
+            }
             return 0;
 
         case WM_DESTROY:

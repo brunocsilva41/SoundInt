@@ -535,6 +535,10 @@ bool TextField::onPointer(const PointerEvent& e)
             if (!captured_) {
                 return false;
             }
+            // Up de outro botao nao conclui a interacao (segura a captura).
+            if (e.button != MouseButton::Left) {
+                return true;
+            }
             captured_ = false;
             pressed_ = false;
             invalidate();

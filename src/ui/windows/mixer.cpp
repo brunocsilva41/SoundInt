@@ -22,6 +22,7 @@ namespace {
 
 constexpr wchar_t kClassName[] = L"SoundIntMixerFlyout";
 constexpr DWORD kSettleMs = 250;    // ignora perda de foco imediata ao mostrar
+constexpr DWORD kTrayGuardMs = 250; // F5: guarda do toggle apos hide por foco
 constexpr float kIconBox = 20.f;    // caixa do icone da linha
 constexpr float kBtnSize = 32.f;    // botao-glyph (mute/rota/config)
 
@@ -114,6 +115,11 @@ public:
             case PointerKind::Up: {
                 if (!captured_) {
                     return false;
+                }
+                // Up de outro botao nao dispara click (segura a captura —
+                // mesmo filtro dos controles do Track E).
+                if (e.button != MouseButton::Left) {
+                    return true;
                 }
                 captured_ = false;
                 pressed_ = false;
@@ -968,6 +974,18 @@ public:
         refresh();
     }
 
+    // F5: true se o flyout foi escondido por perda de foco ha menos de
+    // kTrayGuardMs — o clique na tray que causou o hide ainda vai postar
+    // WM_APP_SHOW_REQUEST, e reabrir faria o flyout "piscar".
+    bool recentlyHiddenByFocus() const
+    {
+        return hiddenByFocusTick_ != 0 &&
+               GetTickCount() - hiddenByFocusTick_ < kTrayGuardMs;
+    }
+
+    // Consome a guarda: o proximo toggle volta ao comportamento normal.
+    void consumeHiddenByFocus() { hiddenByFocusTick_ = 0; }
+
     void refresh()
     {
         refreshPending_ = false;
@@ -1164,6 +1182,10 @@ protected:
         if (GetTickCount() - shownTick_ < kSettleMs) {
             return;
         }
+        // Perda de foco esconde o flyout: marca o instante para o toggleAt
+        // consumir o pedido da tray que chega logo em seguida (F5). So este
+        // caminho marca — hide() explicito (WM_CLOSE, toggleAt) nao marca.
+        hiddenByFocusTick_ = GetTickCount();
         hide();
     }
 
@@ -1179,10 +1201,23 @@ protected:
 
         switch (e.kind) {
             case PointerKind::Down: {
-                // Dropdown aberto: clique fora dele recolhe antes do dispatch.
+                // Captura ativa (ex.: hold do slider): o Down — mesmo de
+                // outro botao — e do controle capturado. Re-hit-testar
+                // trocaria o alvo, engolia o Up original e o controle
+                // interno ficava "preso" (Move sem botao aplicando valor;
+                // padrao do modal, modal_common.cpp:512-517).
+                if (capture_ != nullptr) {
+                    capture_->onPointer(e);
+                    return true;
+                }
+
+                // Dropdown aberto: clique fora dele recolhe e CONSOME o
+                // gesto — nao atravessa para o controle de baixo (padrao
+                // settings_page.cpp:107,117-120).
                 if (expandedRow_ != nullptr &&
                     !expandedRow_->bounds().contains(e.x, e.y)) {
                     expandedRow_->collapseRoute();
+                    return true;
                 }
 
                 Control* target = nullptr;
@@ -1199,13 +1234,18 @@ protected:
                     return false;
                 }
 
-                setFocusTo(focusTarget);
                 capture_ = target;   // trava o refresh durante o dispatch
                 const bool consumed = target->onPointer(e);
                 if (consumed) {
                     captureMouse();
                 } else {
                     capture_ = nullptr;
+                }
+                // Foco de teclado so no clique esquerdo consumido: antes o
+                // setFocusTo rodava antes do dispatch e sem filtrar botao —
+                // clique direito mudava o foco com o popup aberto.
+                if (consumed && e.button == MouseButton::Left) {
+                    setFocusTo(focusTarget);
                 }
                 return consumed;
             }
@@ -1234,8 +1274,14 @@ protected:
                 }
                 Control* target = capture_;
                 const bool consumed = target->onPointer(e);
-                releaseMouse();
-                capture_ = nullptr;
+                // Up de outro botao nao conclui a interacao: o controle
+                // segura a captura e a janela mantem o roteamento (padrao do
+                // modal_common). Soltar aqui deixaria um captured_ fantasma
+                // no controle — ex.: slider aplicando volume no hover.
+                if (e.button == MouseButton::Left) {
+                    releaseMouse();
+                    capture_ = nullptr;
+                }
                 return consumed;
             }
 
@@ -1259,6 +1305,14 @@ protected:
             }
 
             case PointerKind::Wheel: {
+                // Captura ativa: o wheel e do controle capturado (ex.:
+                // ajusta o slider sob o cursor). NAO rola o painel —
+                // deslocaria o conteudo, o Up cairia fora do alvo e o
+                // clique seria engolido (critico em trackpads, que
+                // emitem wheel durante o hold; espelha modal_common.cpp:574).
+                if (capture_ != nullptr) {
+                    return capture_->onPointer(e);
+                }
                 if (!panel_.bounds().contains(e.x, e.y)) {
                     return false;
                 }
@@ -1583,6 +1637,7 @@ private:
     MixerHost host_;
     POINT anchor_{};
     DWORD shownTick_ = 0;
+    DWORD hiddenByFocusTick_ = 0;   // F5: tick do hide por perda de foco (0 = nunca)
     float scale_ = 1.f;   // dpiScale() fixado no refresh (fonte unica)
 
     controls::ListPanel panel_;
@@ -1659,6 +1714,14 @@ void toggleAt(POINT anchor)
 {
     Module& state = module();
     if (!state.initialized) {
+        return;
+    }
+    // clique na tray fecha o flyout que perdeu foco no mesmo instante;
+    // sem isto o pedido reabre e o flyout "pisca": o clique gera
+    // WA_INACTIVE -> hide ANTES de WM_APP_SHOW_REQUEST chegar, entao o
+    // toggle consumido aqui mantem o flyout fechado (F5).
+    if (state.window && state.window->recentlyHiddenByFocus()) {
+        state.window->consumeHiddenByFocus();
         return;
     }
     if (!state.window) {

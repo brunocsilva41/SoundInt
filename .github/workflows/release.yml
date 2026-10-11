@@ -240,18 +240,19 @@ jobs:
           }
 
           # Manifest ESTAVEL: aponta para o .exe do instalador.
+          # "size" e o nome do contrato do parser (manifest.cpp).
           $manifest = [ordered]@{
             version    = $version
             tag        = $tag
             url        = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag/SoundInt-Setup-$version.exe"
             sha256     = (Get-FileHash -Algorithm SHA256 -Path $setup).Hash.ToLower()
-            sizeBytes  = [uint64](Get-Item $setup).Length
+            size       = [uint64](Get-Item $setup).Length
             notes      = $notes
             prerelease = $false
           }
           $manifest | ConvertTo-Json -Depth 3 |
             Set-Content -Path 'update-manifest.json' -Encoding utf8
-          Write-Host "manifest ok: $($manifest.sha256) ($($manifest.sizeBytes) bytes)"
+          Write-Host "manifest ok: $($manifest.sha256) ($($manifest.size) bytes)"
 
       - name: Publicar artefatos da release
         uses: actions/upload-artifact@v7
@@ -375,7 +376,7 @@ jobs:
             tag        = $tag
             url        = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag/SoundInt-Setup-$version.exe"
             sha256     = (Get-FileHash -Algorithm SHA256 -Path $setup).Hash.ToLower()
-            sizeBytes  = [uint64](Get-Item $setup).Length
+            size       = [uint64](Get-Item $setup).Length
             notes      = $notes
             prerelease = $false
           }
